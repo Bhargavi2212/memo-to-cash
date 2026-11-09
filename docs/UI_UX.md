@@ -1,0 +1,107 @@
+# Memo-to-Cash — UI / UX
+
+## 1. Principles
+1. **The bill explains itself.** Every number on screen can be traced to a memo line, a return, or a payment in one tap.
+2. **One clear action per screen.** Buyer: pay. Supplier: decide.
+3. **Nothing changes money without a person.** AI suggestions look like suggestions (dashed border, "Suggested by agent").
+4. **Judges understand it in 10 seconds** with no login and no setup.
+5. Mobile-first for buyers; desktop-first for suppliers.
+
+## 2. Routes
+| Route | Who | Purpose |
+|---|---|---|
+| `/` | Judge/visitor | One-line pain, **Start the demo** (creates the visitor's own copy), **See the supplier side**, sandbox note |
+| `/s/[token]` | Buyer | Statement, pay, ask |
+| `/s/[token]/receipt/[paymentId]` | Buyer | Receipt after paying |
+| `/supplier` | Supplier | Who owes what + decisions panel |
+| `/supplier/buyers/[id]` | Supplier | One buyer's memos, invoices, messages, history |
+| `/supplier/payments/[id]` | Supplier | Payment split + PayPal status + audit |
+| `/supplier/import` | Supplier | Upload ERP export |
+
+## 3. Design tokens
+- Font: Inter; numbers `font-variant-numeric: tabular-nums`.
+- Colours: ink `#111827`, muted `#6B7280`, line `#E5E7EB`, background `#FFFFFF`/`#F9FAFB`, accent `#1D4ED8` (actions), success `#047857`, warning `#B45309`, danger `#B91C1C`. PayPal buttons keep PayPal's own styling.
+- Status chips (text + colour): Returned (green), Kept (blue), Still with you (grey), Overdue 18d (amber, computed), Paid (green), Part paid (blue).
+- Radius 8px, spacing 4/8/16/24, max content width 960px (buyer), 1280px (supplier).
+
+## 4. Screens
+### 4.1 Buyer statement `/s/[token]` (mobile)
+```
+┌───────────────────────────────┐
+│ Demo Diamond Co.              │
+│ Statement for Northside Jewel.│
+│  You owe   $8,420.00          │
+│  3 invoices · oldest 48 days  │
+├───────────────────────────────┤
+│ ▸ Memo M-201  sent 75d ago    │
+│   S-101 Round 1.01ct  $2,350  │
+│        Kept → INV-1038        │
+│   S-102 Oval 1.20ct   $1,200  │
+│        ✓ Returned · R-311     │
+│   S-103 Pendant         $800  │
+│        Still with you, due in 11d│
+│   S-104 Stud pair     $1,150  │
+│        Kept → INV-1038        │
+│ ▸ Memo M-207 … ▸ Memo M-212 … │
+├───────────────────────────────┤
+│ Invoices                      │
+│ ☑ INV-1038 $3,500 overdue 18d⚠│
+│ ☑ INV-1042 $3,500 due in 10d  │
+│ ☑ INV-1051 $1,420 due in 25d  │
+│ Pay $8,420.00 → split shown   │
+│ [ PayPal ] [ Pay Later ]      │
+│ [ Venmo ]                     │
+├───────────────────────────────┤
+│ Ask about this statement      │
+│ [Why is S-102 on my bill?]    │
+│ [What do I owe for M-207?]    │
+│ [ type a question…       ➤ ]  │
+└───────────────────────────────┘
+```
+- Split preview appears under the amount. Default (all invoices): "INV-1038 $3,500 · INV-1042 $3,500 · INV-1051 $1,420". Demo story uses "Pay a different amount" = $5,000 → "INV-1038 $3,500 · INV-1042 $1,500".
+- "Pay a different amount" opens a number field; preview updates live (debounced call to `/preview`).
+- Answers show record chips (`Return R-311 · 38 days ago`) that scroll to the line.
+- "Something wrong? Tell Demo Diamond Co." → free text → message (becomes a proposal).
+- States: loading skeleton; all paid ("Nothing owed — thank you"); invalid link; PayPal error banner ("Payment didn't go through. You weren't charged.").
+- **Notices** (from `Statement.notices`, shown as a banner above the total): `PAYMENT_VOIDED` → "A payment you started didn't go through — nothing was charged." · `PAYMENT_CREDITED` → "$X of your payment is kept as credit on your account." · `RECORDING_PENDING` → "Your payment is received; we're updating your invoices." Credit (if any) shows under the total as "Credit $X".
+
+### 4.2 Receipt
+Amount, date, PayPal capture ID, list "INV-1038 $3,500 → paid in full", "INV-1042 $1,500 → $2,000 left", new balance, "View invoice on PayPal" links.
+
+### 4.3 Supplier overview `/supplier` (desktop)
+```
+┌──────────────────────────────────────────────┬───────────────────────────┐
+│ Open $8,420   Past due $3,500   Paid this week $0 │ Needs your decision (1) │
+├──────────────────────────────────────────────┤ ┌───────────────────────┐ │
+│ Buyer          Out  Kept  Ret.  Owed   Oldest │ │ Northside: "scratch on│ │
+│ Northside Jew.  2    5    5   $8,420   48d ⚠ │ │ the S-120 solitaire,  │ │
+│ Harbor Gems (sample)  …   $2,300   12d       │ │ take $20 off"         │ │
+│ Lakeside (sample)     …   $5,960   31d       │ │ Checked: S-120 kept on│ │
+├──────────────────────────────────────────────┤ │ INV-1051, price $1,420│ │
+│ Recent payments                               │ │ → −$20 on INV-1051    │ │
+│ <date>  Northside  $5,000  split 2 invoices ✓│ │ [Approve][Edit][Reject]│ │
+└──────────────────────────────────────────────┴───────────────────────────┘
+```
+Demo mode: the overview shows the visitor's own Northside Jewelers copy plus two read-only **sample rows** (Harbor Gems, Lakeside Fine Jewelry). They are a **static constant in the frontend** (`components/supplier/SampleRows.tsx`), rendered only when `DEMO_MODE`, labelled "sample — not on PayPal", not clickable, not in the database. Header totals count only real rows. Header uses **"Past due"** (any overdue), not ">30d".
+
+### 4.3b Supplier buyer detail `/supplier/buyers/[id]`
+Memos and lines (same grouping as the buyer sees), invoices with PayPal status, messages and proposals, payments. Buttons: **Copy statement link** · **Record payment** (modal: method Cheque/Wire/Other, reference, amount, optional invoices, split preview, Confirm).
+
+### 4.4 Payment detail
+Header: $5,000 · PayPal capture `4CN0…` · <date>. Table: invoice → amount → PayPal status (fetched) → link. Timeline: captured → split → recorded INV-1038 → recorded INV-1042 → webhook received.
+
+### 4.5 Landing `/`
+"Your buyers get one link: what they kept, what they returned, what they owe — and one button to pay it all on PayPal." Buttons: **Start the demo** (your own copy, ~5 s while PayPal invoices are created; show progress) · **See the supplier side** · **Start again**. Small print: "Sandbox only. Buyer login: … (sandbox)."
+
+## 5. Copy rules
+Plain words: "You owe", "Returned", "Kept", "Still with you". No jargon (no "AR", "allocation", "remittance" on buyer screens). Money always with 2 decimals and $.
+
+## 6. Accessibility & responsive
+Contrast AA; focus rings; chips include text; tables become stacked cards < 640px; buttons ≥ 44px tall; numbers right-aligned.
+
+## 7. Video-critical moments (design must make these obvious)
+1. Returned vs kept vs still-with-you on one screen.
+2. Agent answer with a record chip.
+3. One payment → split preview → receipt.
+4. PayPal's own invoice page showing the new balance.
+5. Supplier approving an agent proposal.
