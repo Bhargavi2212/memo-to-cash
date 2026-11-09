@@ -50,6 +50,7 @@ memo-to-cash/
 │
 ├── app/                            Next.js pages
 │   ├── page.tsx                    P0 shell → P5 judge path ("Start the demo")
+│   ├── api/[...path]/route.ts      P0 runtime proxy: /api/* → api service (private network)
 │   ├── layout.tsx · globals.css    P0
 │   ├── s/[token]/page.tsx          P2 buyer statement
 │   ├── s/[token]/receipt/[paymentId]/page.tsx   P2
@@ -111,6 +112,7 @@ memo-to-cash/
 Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Render · 4 Llama latency · 5 Llama key + model id · 6 transaction id in record response · 7 tool calling + json_schema together · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
 
 ## Decisions log (newest first — add one line per decision)
+- 2026-11-09 Render details: `APP_ENV` = dev|prod|test; `APP_BASE_URL` explicit (web address, no fallback); `/api/*` forwarded by a runtime Next.js proxy route (no build-time env needed); PayPal webhook registered on the api's public URL; secrets per service (`sync: false` not allowed in env groups); Blueprint created after the P0 merge; rate limit uses first `X-Forwarded-For` IP.
 - 2026-11-09 **Switched hosting to Render** (sponsor): Blueprint `render.yaml`, Starter plan (no sleep), web (Next.js) + api (FastAPI) in P0, background worker in P3 (sweep every 30 s + daily reminders) — replaces page-load sweep and the cron endpoint. DB stays on Neon (Render free Postgres expires after 30 days). Sponsor prizes in play: APIMatic and Render (only one can be won).
 - 2026-11-09 Capture holds the buyer lock across the PayPal capture call (only exception to "PayPal after commit"). Integration tests use real Postgres (Neon `test` branch locally, Postgres service in CI). Docs pushed before Vercel import.
 - 2026-11-09 Sponsor prize: target **APIMatic** (Context Plugin for PayPal used in Claude Code to build the PayPal integration; low cost, fits how we build). **Not** AG Grid for now (needs AG Studio + Studio Agent Framework rebuild of supplier side, ~1 day; Supplora already strong there) — revisit only if P4 ends early. Render/Bryntum/Channel3 don't fit; others have no prize. Only one sponsor prize can be won per project.

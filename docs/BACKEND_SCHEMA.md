@@ -282,7 +282,7 @@ Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATIO
 | `/statement/{token}/*` | statement token only |
 | `/supplier/overview`, `/supplier/buyers/{id}`, `/supplier/payments/{id}`, `/supplier/proposals*`, `/supplier/payments/record` | admin **or** demo cookie (demo sees only its own session's buyers) |
 | `/supplier/import`, `/supplier/sync/{id}` | admin only (demo visitors cannot import) |
-| `/demo/start` | public, DEMO_MODE, ≤ 5 per IP-hash per hour (`demo_rate`) |
+| `/demo/start` | public, DEMO_MODE, ≤ 5 per IP-hash per hour (`demo_rate`); client IP = first address in `X-Forwarded-For` (set by Render's edge, passed on by the web proxy) — spoofable by calling the api directly, acceptable for a demo limit |
 | `/paypal/webhook` | PayPal signature |
 | `/health` public · `/health/deep` admin only | |
 

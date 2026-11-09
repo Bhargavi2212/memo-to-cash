@@ -106,7 +106,7 @@ npm install
 - Tests: `tests/unit` (no DB), `tests/integration` (FastAPI TestClient + PayPal mocked with recorded JSON in `tests/fixtures/paypal/`, **real Postgres** via `TEST_DATABASE_URL` — needed for unique keys and advisory locks), Hypothesis for split. No network except the test database. Locally `TEST_DATABASE_URL` = a Neon branch named `test` (never `dev` or production); in CI a Postgres 16 service container. Each test run migrates to head and truncates tables between tests.
 
 ## 7. Security & data
-- Never read, print or echo `.env` or secret values. Use env vars; ask the user to set them in the Render dashboard (env group `mtc-shared`); `render.yaml` only lists keys with `sync: false`.
+- Never read, print or echo `.env` or secret values. Use env vars; ask the user to set them in the Render dashboard. Secrets are declared **on each service** in `render.yaml` with `sync: false` (values entered in the dashboard); the env group `mtc-shared` holds **non-secret** shared values only.
 - No real company/client/buyer/ERP names anywhere. Demo: "Demo Diamond Co.", "Northside Jewelers", SKUs `S-1xx`, memos `M-2xx`, invoices `INV-10xx`.
 - Statement tokens: `secrets.token_urlsafe(32)`. Demo cookie signed with `DEMO_COOKIE_SECRET`.
 - Webhooks: verify signature before trusting; store raw event; process idempotently.

@@ -5,7 +5,7 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 
 ## Phase P0 — Skeleton live (Mon)
 **Spec: `docs/phases/P0.md` (source of truth for tasks, setup and done-when).** Summary:
-- [ ] Next.js (TS, Tailwind v4) at repo root; FastAPI at `backend/main.py`; `render.yaml` Blueprint: web + api services (Starter), web rewrites `/api/*` to api
+- [ ] Next.js (TS, Tailwind v4) at repo root; FastAPI at `backend/main.py`; `render.yaml` Blueprint: web + api services (Starter); the web's runtime proxy route `app/api/[...path]/route.ts` forwards `/api/*` to the api
 - [ ] Neon (prod = `main` branch; local = `dev`; tests = `test`); Alembic with an empty baseline (tables in P1)
 - [ ] `backend/core/config.py` (pydantic-settings, `.env`, sandbox guard; only `PAYPAL_BASE_URL`, `APP_ENV`, `DATABASE_URL` required)
 - [ ] `/api/health` → `{ok, sandbox, db, env}`; `/api/health/deep` (admin) → `{db, paypal_token, llm:{ok, model, ms}}`
