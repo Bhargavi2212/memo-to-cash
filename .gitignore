@@ -2,3 +2,13 @@
 .venv/
 __pycache__/
 .qodo/
+node_modules/
+.next/
+.vercel/
+.env.local
+.env.*.local
+.claude/settings.local.json
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+coverage/
