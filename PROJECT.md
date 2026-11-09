@@ -43,7 +43,7 @@ memo-to-cash/
 │   ├── llama_smoke.py              P0 Llama key + model check (prints ok/model/ms only)
 │   └── sandbox_smoke.py            P5 end-to-end run against the real sandbox
 │
-├── package.json · next.config.ts · tsconfig.json · postcss.config.mjs · eslint.config.mjs · next-env.d.ts   P0 (Tailwind v4: tokens in app/globals.css, no tailwind.config)
+├── package.json · next.config.ts · tsconfig.json · eslint.config.mjs · AGENTS.md   P0 (Next 16.4; Tailwind v4 via Turbopack CSS loader, tokens in app/globals.css; next-env.d.ts generated, git-ignored)
 ├── render.yaml                     P0 Render Blueprint (web + api, Starter) · P3 adds the worker
 ├── requirements.txt · requirements-dev.txt · pyproject.toml (ruff, pytest)  P0
 ├── alembic.ini                     P0 (migrations use DATABASE_URL_UNPOOLED)

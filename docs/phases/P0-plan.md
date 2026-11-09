@@ -54,3 +54,14 @@ Exactly P0.md §4: landing shell live · `/api/health` = `{"ok":true,"sandbox":t
 
 ## 5. Stop-and-ask points
 Llama smoke fails · web → api unreachable on Render (fallback `API_INTERNAL_BASE`) · Python 3.12 not used by Render · any spec step that turns out impossible (e.g. scaffold's ESLint config shape differs — adapt and report).
+
+## 6. Build log — deviations from P0.md found while building (P0.md updated to match)
+| # | What happened | Decision |
+|---|---|---|
+| B1 | `create-next-app@latest` = **Next.js 16.4.5**: Tailwind v4 via the Turbopack CSS loader (no `postcss.config`), Cache Components on, `next-env.d.ts` git-ignored and generated, `AGENTS.md` written (and re-created by `next dev`) | Follow the scaffold: keep `next-env.d.ts` ignored, commit `AGENTS.md`, CI runs `next typegen` before `tsc` |
+| B2 | With Cache Components, route segment configs like `export const dynamic` are removed; a handler that reads the request already runs per request | Proxy has no `dynamic` export; build output shows it as dynamic (ƒ) |
+| B3 | `/api/health/deep` calls `llm.ping()` | Llama client (step 6) committed before health (step 5) |
+| B4 | `render.yaml` uses `autoDeployTrigger: checksPass` | Render deploys `main` only after GitHub CI is green (matches "never deploy red CI"); if the Blueprint rejects the field, fall back to `autoDeployTrigger: commit` |
+| B5 | Service names give the URLs only if free on Render | After creating the Blueprint, confirm the real URLs; if Render added a suffix, update `APP_BASE_URL`/`API_PUBLIC_URL` in `mtc-shared` |
+| B6 | Scaffold sample SVGs (incl. the Vercel logo) | Removed; `public/` is empty (not tracked) |
+| B7 | `sslmode=require` only when the URL doesn't set it and the host isn't local | Keeps P1's CI Postgres (no TLS) working |
