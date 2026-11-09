@@ -1,0 +1,128 @@
+# PROJECT.md — Memo-to-Cash (the whole thing on one page)
+
+**Start here.** This is the map. Details live in `docs/`. Claude Code reads this first, then `CLAUDE.md`.
+
+## What
+Buyers who take goods **on memo** (consignment) get **one statement link** that shows what they kept, what they returned (credited) and what they owe — and they **pay many PayPal invoices in one payment**. An AI agent (Meta Llama) explains the bill from the records and turns buyer messages into proposals the supplier approves.
+
+## Why
+- Memo is normal trade: 39% of US jewelers' store merchandise is memo inventory; goods sit 1–3 months.
+- The pain is after the invoice: the buyer has to work out which memo, what was credited, what's owed across invoices, then writes a cheque; the accountant chases and matches by hand.
+- Small businesses wait: >half have invoices unpaid past 30 days (avg $17.7K); payments ~9 days late.
+- QuickBooks, Square and Xero/Stripe users keep asking to pay many invoices at once. Big companies get it from Versapay/Billtrust (enterprise contracts). **PayPal Invoicing doesn't have it.** We build it on PayPal.
+
+## For whom
+- **Supplier** (customer): small/mid wholesaler with an ERP and a PayPal business account. Diamonds/jewelry first.
+- **Buyer**: retailer on memo; phone and desktop.
+- **Judges**: PayPal DevRel/engineering/PM — review the Devpost page, video and live link only. Everything must explain itself.
+
+## How it works (short)
+ERP export → mirror invoices as **real PayPal invoices** → buyer **statement link** → **one PayPal checkout** (PayPal, Pay Later, Venmo, bank) → **split** across invoices → **recorded on each PayPal invoice** → webhooks keep it in sync → **agent** answers questions + turns messages into **proposals** → supplier approves → PayPal invoice updated / PayPal reminder sent.
+
+## Stack
+Next.js (Vercel) · Python FastAPI as Vercel functions · Neon Postgres · APIMatic Context Plugin for PayPal (build tooling, sponsor) · PayPal Invoicing v2, Orders v2, JS SDK, Webhooks (sandbox) · Meta Llama API (Llama 4 Maverick, JSON-schema output, tool calling).
+
+## File structure
+✅ = exists now · everything else is created in the phase shown. Update this tree when you add/move files (same commit).
+```
+memo-to-cash/
+├── PROJECT.md                      ✅ this file — start here
+├── CLAUDE.md                       ✅ build rules for Claude Code
+├── README.md                       ✅ (rewritten in P5: judge path, criteria → evidence)
+├── LICENSE                         ✅ MIT
+├── .gitignore                      ✅
+├── .env                            ✅ local only, never committed
+├── .claude/
+│   ├── settings.json               ✅ blocks reading .env, force-push
+│   └── commands/                   ✅ phase.md · verify.md · sandbox-smoke.md · review-money.md
+├── docs/                           ✅ PRD · TRD · UI_UX · APP_FLOW · BACKEND_SCHEMA · IMPLEMENTATION_PLAN · RESEARCH · APIMATIC (sponsor proof log) · _archive/ · img/ (screenshots, P1+)
+│   └── phases/                     ✅ P0.md (one detailed spec per phase, written before the phase starts)
+├── scripts/                        __init__.py (P0)
+│   ├── sandbox/                    ✅ statement_test.ps1 · statement_test_v2.ps1 (manual PayPal experiments)
+│   ├── llama_smoke.py              P0 Llama key + model check (prints ok/model/ms only)
+│   └── sandbox_smoke.py            P5 end-to-end run against the real sandbox
+│
+├── package.json · next.config.ts · tsconfig.json · postcss.config.mjs · eslint.config.mjs · next-env.d.ts   P0 (Tailwind v4: tokens in app/globals.css, no tailwind.config)
+├── vercel.json                     P0 (Python functions) · P3 adds the daily cron
+├── requirements.txt · requirements-dev.txt · pyproject.toml (ruff, pytest)  P0
+├── alembic.ini                     P0 (migrations use DATABASE_URL_UNPOOLED)
+├── .github/workflows/ci.yml        P0 ruff · pytest · tsc · eslint
+│
+├── app/                            Next.js pages
+│   ├── page.tsx                    P0 shell → P5 judge path ("Start the demo")
+│   ├── layout.tsx · globals.css    P0
+│   ├── s/[token]/page.tsx          P2 buyer statement
+│   ├── s/[token]/receipt/[paymentId]/page.tsx   P2
+│   └── supplier/
+│       ├── page.tsx                P3 overview
+│       ├── buyers/[id]/page.tsx    P3 buyer detail (copy link, record payment)
+│       ├── payments/[id]/page.tsx  P3 payment detail
+│       └── import/page.tsx         P3 ERP upload (admin only)
+├── components/                     P2–P3 PayPanel · AskBox · MemoGroup · InvoiceList · StatusChip · Receipt · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
+├── lib/
+│   ├── api.ts                      P2 typed API client
+│   └── money.ts                    P2 the only money formatter
+│
+├── api/
+│   └── index.py                    P0 Vercel Python entry → FastAPI app
+├── backend/
+│   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2
+│   ├── db/         session.py P0 · models.py P1 · migrations/ (Alembic) P0–P1
+│   ├── paypal/     client.py P1 · invoices.py P1 · orders.py P2 · webhooks.py P3
+│   ├── services/   importer.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · sync.py (sweep) P3 · proposals.py P3 · audit.py P1
+│   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · supplier.py P3 · paypal_webhook.py P3 · cron.py P3
+│   └── agent/      llm.py P0 (smoke call) → P4 · tools.py · schemas.py · answer.py · triage.py · reminders.py · prompts/*.md   P4
+├── seed/
+│   ├── demo_seed.py                P1 builds the §Seed data (relative dates) → runs the importer
+│   └── sample_export.csv           P1 example ERP export for the import screen
+├── eval/
+│   ├── messages.jsonl              P4 30 labelled buyer messages (real redacted first)
+│   ├── baseline.py                 P4 keyword rules
+│   └── run_eval.py                 P4 `python -m eval.run_eval`
+└── tests/
+    ├── unit/         test_config.py · test_money.py · test_dates.py · test_split.py (Hypothesis) · test_importer.py · test_validators.py
+    ├── integration/  test_health.py · test_statement_api.py · test_payments_flow.py · test_webhooks.py · test_demo.py · test_scoping.py
+    └── fixtures/paypal/*.json      recorded sandbox responses (no network in tests)
+```
+
+## Docs
+| Doc | Answers |
+|---|---|
+| `docs/PRD.md` | Problem, evidence, users, scope, out of scope, success measures, assumptions |
+| `docs/TRD.md` | Requirements FR-1…15 with acceptance, non-functional rules, PayPal spec, AI spec, config, open checks (repo layout → this file) |
+| `docs/UI_UX.md` | Routes, design tokens, every screen and state, copy rules, video moments |
+| `docs/APP_FLOW.md` | Journeys J1–J9, sequence diagrams, state machines |
+| `docs/BACKEND_SCHEMA.md` | Tables, endpoints, JSON shapes, PayPal invoice body, AI schemas, CSV format, eval format |
+| `docs/IMPLEMENTATION_PLAN.md` | Phases P0–P5, tasks, done-when tests, cut list, Stage One checklist, video script |
+| `docs/RESEARCH.md` | Sources and our sandbox test results |
+| `CLAUDE.md` | How to build: commands, definition of done, invariants, PayPal facts, commit rules |
+
+## Status (update at the end of every task)
+| Phase | State | Notes |
+|---|---|---|
+| Research + docs | ✅ done | Nov 8–9 |
+| P0 Skeleton live | ⬜ | |
+| P1 Data + PayPal mirror | ⬜ | |
+| P2 Statement + one payment for many invoices | ⬜ | |
+| P3 Supplier side + webhooks | ⬜ | |
+| P4 Agent + eval | ⬜ | |
+| P5 Ship + submit | ⬜ | Target Wed Nov 11, 11pm ET |
+
+Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Vercel · 4 Llama latency · 5 Llama key + model id · 6 transaction id in record response · 7 tool calling + json_schema together · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
+
+## Decisions log (newest first — add one line per decision)
+- 2026-11-09 Capture holds the buyer lock across the PayPal capture call (only exception to "PayPal after commit"). Integration tests use real Postgres (Neon `test` branch locally, Postgres service in CI). Docs pushed before Vercel import.
+- 2026-11-09 Sponsor prize: target **APIMatic** (Context Plugin for PayPal used in Claude Code to build the PayPal integration; low cost, fits how we build). **Not** AG Grid for now (needs AG Studio + Studio Agent Framework rebuild of supplier side, ~1 day; Supplora already strong there) — revisit only if P4 ends early. Render/Bryntum/Channel3 don't fit; others have no prize. Only one sponsor prize can be won per project.
+- 2026-11-09 Review 3: repeated `/capture` on a captured payment returns the existing receipt (200); 409 only for STATEMENT_CHANGED; approved-but-uncaptured orders are captured (CHECKOUT.ORDER.APPROVED webhook or sweep) after the split check; page-load sweep is DB-only + max 1 PayPal call and never delays the page; `custom_id` = payment uid everywhere; J6 follows TRD §6b.
+- 2026-11-09 Review 2: seeded complaint moved to S-120 / INV-1051 (stays valid after the judge pays); PayPal-Request-Id = env + row UUID; sandbox invoice numbers always suffixed; lost-capture recovery via `custom_id` + webhook; stuck RECORDING resolved by exact `[MTC:<uid>]` note match; no PayPal "void" (order just expires); statement API returns invoice ids, payments list, relative dates; one `sweep` for pending work (webhook end, page loads, daily cron); sample supplier rows are a frontend constant; "Past due" instead of ">30d"; seed goes through the importer.
+- 2026-11-09 Review fixes: memo/invoice numbers unique per buyer + separate `paypal_invoice_number` (demo suffix); our `ledger_status` + PayPal's raw `paypal_status` as two columns; send `invoice_date` + DUE_ON_DATE_SPECIFIED so due dates match; seed dates relative to demo start; every demo copy has one seeded proposal; race-safe recording (RECORDING state + `MTC-A<id>` note); planned split re-checked at capture (409 if statement changed); no minimum allocation; deductions ≤ line price and ≤ invoice due; AI answer check allows computed totals; sandbox buyer login in config; manual PayPal scripts moved to `scripts/sandbox/`.
+- 2026-11-09 Build the missing capability (one payment for many PayPal invoices via Orders + record per invoice), not "one statement invoice". Accept `MARKED_AS_PAID` and document it.
+- 2026-11-09 Our ledger decides balances; PayPal status mirrored, mismatches flagged.
+- 2026-11-09 Each demo visitor gets their own copy (no shared reset).
+- 2026-11-09 Hosting Vercel; Next.js + Python functions; Neon; Meta Llama.
+- 2026-11-09 Pay Later shown as offered, not pitched as B2B financing (consumer credit).
+- 2026-11-09 No WhatsApp/screenshot/voice intake (adds steps for users).
+- 2026-11-08 Lane: memo/consignment B2B — empty in this hackathon (404 repos checked).
+
+## Links
+Repo: https://github.com/Bhargavi2212/memo-to-cash · Live: _(add after P0)_ · Video: _(P5)_ · Devpost: _(P5)_
