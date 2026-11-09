@@ -31,12 +31,13 @@ memo-to-cash/
 ├── README.md                       ✅ (rewritten in P5: judge path, criteria → evidence)
 ├── LICENSE                         ✅ MIT
 ├── .gitignore                      ✅
+├── .gitattributes                  P0 (LF line endings)
 ├── .env                            ✅ local only, never committed
 ├── .claude/
 │   ├── settings.json               ✅ blocks reading .env, force-push
 │   └── commands/                   ✅ phase.md · verify.md · sandbox-smoke.md · review-money.md
 ├── docs/                           ✅ PRD · TRD · UI_UX · APP_FLOW · BACKEND_SCHEMA · IMPLEMENTATION_PLAN · RESEARCH · APIMATIC (sponsor proof log) · _archive/ · img/ (screenshots, P1+)
-│   └── phases/                     ✅ P0.md (one detailed spec per phase, written before the phase starts)
+│   └── phases/                     ✅ P0.md (spec) · P0-plan.md (build plan + gaps) — one spec per phase, written before it starts
 ├── scripts/                        __init__.py (P0)
 │   ├── sandbox/                    ✅ statement_test.ps1 · statement_test_v2.ps1 (manual PayPal experiments)
 │   ├── llama_smoke.py              P0 Llama key + model check (prints ok/model/ms only)
@@ -112,6 +113,7 @@ memo-to-cash/
 Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Render · 4 Llama latency · 5 Llama key + model id · 6 transaction id in record response · 7 tool calling + json_schema together · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
 
 ## Decisions log (newest first — add one line per decision)
+- 2026-11-09 P0 plan review (`docs/phases/P0-plan.md` G1–G16): Neon AWS US East + Render `virginia`; `uvicorn` in `requirements.txt`; settings `extra="ignore"`; psycopg `prepare_threshold=None` behind Neon's pooler; OpenAPI under `/api`; proxy passes `X-Forwarded-For` unchanged and returns 502 `API_UNREACHABLE`; never set `NODE_ENV` on Render; Bhargavi opens PRs and runs production migrations.
 - 2026-11-09 Render details: `APP_ENV` = dev|prod|test; `APP_BASE_URL` explicit (web address, no fallback); `/api/*` forwarded by a runtime Next.js proxy route (no build-time env needed); PayPal webhook registered on the api's public URL; secrets per service (`sync: false` not allowed in env groups); Blueprint created after the P0 merge; rate limit uses first `X-Forwarded-For` IP.
 - 2026-11-09 **Switched hosting to Render** (sponsor): Blueprint `render.yaml`, Starter plan (no sleep), web (Next.js) + api (FastAPI) in P0, background worker in P3 (sweep every 30 s + daily reminders) — replaces page-load sweep and the cron endpoint. DB stays on Neon (Render free Postgres expires after 30 days). Sponsor prizes in play: APIMatic and Render (only one can be won).
 - 2026-11-09 Capture holds the buyer lock across the PayPal capture call (only exception to "PayPal after commit"). Integration tests use real Postgres (Neon `test` branch locally, Postgres service in CI). Docs pushed before Vercel import.
