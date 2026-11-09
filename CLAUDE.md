@@ -27,7 +27,8 @@ npm install
 ```
 | Task | Command |
 |---|---|
-| Backend dev | `uvicorn api.index:app --reload --port 8000` |
+| Backend dev | `uvicorn backend.main:app --reload --port 8000` |
+| Worker (from P3) | `python -m backend.worker` |
 | Frontend dev (proxies `/api` → :8000) | `npm run dev` |
 | Python tests | `pytest -q` |
 | One test | `pytest -q tests/unit/test_split.py -k oldest_first` |
@@ -39,7 +40,7 @@ npm install
 | Llama key check | `python -m scripts.llama_smoke` |
 | AI eval | `python -m eval.run_eval` (prints agent vs baseline table) |
 | Sandbox smoke (real PayPal sandbox) | `python -m scripts.sandbox_smoke` |
-| Deploy | push to `main` → Vercel builds. Never deploy with red CI. |
+| Deploy | merge to `main` → Render auto-deploys (Blueprint `render.yaml`). Migrations by hand: `alembic upgrade head` with production URLs. Never merge with red CI. |
 
 ## 2. Definition of done (every task)
 - [ ] Behaviour matches the doc + FR acceptance in `docs/TRD.md §3`
@@ -79,7 +80,7 @@ npm install
 - Send `invoice_date` and `payment_term: {term_type: DUE_ON_DATE_SPECIFIED, due_date}` so PayPal's due date equals ours (never NET_30 from today).
 - PayPal invoice statuses include UNPAID, PAYMENT_PENDING, PARTIALLY_REFUNDED: store raw in `paypal_status` (TEXT), never in our enum.
 - `PayPal-Request-Id` keys per call: `BACKEND_SCHEMA.md §8`.
-- Unproven (TRD §9 open checks 1–9): PUT on PARTIALLY_PAID; Venmo in sandbox; webhook to Vercel; Llama key/latency; transaction id in record response; tool calling + json_schema together; past invoice/due dates accepted; tiny recorded amounts accepted.
+- Unproven (TRD §9 open checks 1–9): PUT on PARTIALLY_PAID; Venmo in sandbox; webhook to Render; Llama key/latency; transaction id in record response; tool calling + json_schema together; past invoice/due dates accepted; tiny recorded amounts accepted.
 
 ## 4b. Sponsor tool: APIMatic Context Plugin for PayPal
 - Installed in Claude Code (see `docs/phases/P0.md §2`). **Use it whenever you write or change a PayPal call** (invoices, orders, webhooks): pull the endpoint/field details from it instead of guessing. Facts in §4 (proved in our sandbox) still win if the two disagree — note any disagreement in `PROJECT.md`.
@@ -105,7 +106,7 @@ npm install
 - Tests: `tests/unit` (no DB), `tests/integration` (FastAPI TestClient + PayPal mocked with recorded JSON in `tests/fixtures/paypal/`, **real Postgres** via `TEST_DATABASE_URL` — needed for unique keys and advisory locks), Hypothesis for split. No network except the test database. Locally `TEST_DATABASE_URL` = a Neon branch named `test` (never `dev` or production); in CI a Postgres 16 service container. Each test run migrates to head and truncates tables between tests.
 
 ## 7. Security & data
-- Never read, print or echo `.env` or secret values. Use env vars; ask the user to set them in Vercel.
+- Never read, print or echo `.env` or secret values. Use env vars; ask the user to set them in the Render dashboard (env group `mtc-shared`); `render.yaml` only lists keys with `sync: false`.
 - No real company/client/buyer/ERP names anywhere. Demo: "Demo Diamond Co.", "Northside Jewelers", SKUs `S-1xx`, memos `M-2xx`, invoices `INV-10xx`.
 - Statement tokens: `secrets.token_urlsafe(32)`. Demo cookie signed with `DEMO_COOKIE_SECRET`.
 - Webhooks: verify signature before trusting; store raw event; process idempotently.
@@ -115,7 +116,7 @@ npm install
 - Sequence for each small change:
   1. make the change → 2. run the relevant tests (`pytest -q <file>` / `npx tsc --noEmit`) → 3. `git status` (no `.env`, `.venv`, `node_modules`, secrets) → 4. `git add <specific files>` (never `git add .` blindly) → 5. `git commit -m "<type>(<phase>): <what> (<FR-id>)"`.
 - Message format: `feat(p2): split preview endpoint (FR-4)` · `test(p2): property tests for oldest-first split` · `fix(p1): idempotent mirror on retry` · `docs: record PUT-on-partial result`. Types: feat, fix, test, docs, chore, refactor, ci.
-- **Push** at the end of every task and before switching phases (`git push`). Vercel deploys from `main`; work on a phase branch (`p2-statement`) and merge to `main` when the phase's done-when test passes.
+- **Push** at the end of every task and before switching phases (`git push`). Render deploys from `main`; work on a phase branch (`p2-statement`) and merge to `main` when the phase's done-when test passes.
 - Never commit with red tests, never force-push, never rewrite pushed history, never commit `.env`, `.venv`, `node_modules`, `.qodo`.
 - After each task, update `PROJECT.md` (status row, decisions log line if a decision was made) in its own `docs:` commit.
 

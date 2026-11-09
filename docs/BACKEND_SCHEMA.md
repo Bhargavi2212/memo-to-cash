@@ -284,7 +284,7 @@ Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATIO
 | `/supplier/import`, `/supplier/sync/{id}` | admin only (demo visitors cannot import) |
 | `/demo/start` | public, DEMO_MODE, ≤ 5 per IP-hash per hour (`demo_rate`) |
 | `/paypal/webhook` | PayPal signature |
-| `/health` public · `/health/deep` admin only · `/cron/sweep` `CRON_SECRET` | |
+| `/health` public · `/health/deep` admin only | |
 
 **Preview / order defaults** (`/preview`, `/order`, `/supplier/payments/record`)
 - neither `invoice_ids` nor `amount_cents` → all open invoices, full balance.

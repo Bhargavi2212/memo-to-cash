@@ -5,12 +5,12 @@ Status: v1 (Nov 9, 2026). Read with `PRD.md`, `APP_FLOW.md`, `BACKEND_SCHEMA.md`
 ## 1. Stack (fixed)
 | Layer | Choice | Why |
 |---|---|---|
-| Frontend | Next.js (latest stable from `create-next-app` at P0, App Router, TypeScript), Tailwind CSS v4 | Native to Vercel; fast mobile pages |
+| Frontend | Next.js (latest stable from `create-next-app` at P0, App Router, TypeScript), Tailwind CSS v4 — Render web service | Fast mobile pages; `/api/*` rewritten to the API service (same origin) |
 | Payments UI | PayPal JS SDK (`components=buttons`, `enable-funding=venmo,paylater`) | Official buttons for PayPal, Venmo, Pay Later |
-| Backend | Python 3.12, FastAPI, as Vercel Python functions under `/api/*` | Money logic in the language we know best |
-| DB | Neon Postgres (Vercel integration), SQLAlchemy 2 + Alembic | Serverless-friendly Postgres |
+| Backend | Python 3.12, FastAPI (`backend/main.py`, uvicorn) — Render web service; plus a Render **background worker** (`backend/worker.py`, P3) | Money logic in Python; always-on server, real background jobs |
+| DB | Neon Postgres (neon.tech; branches `main`=prod, `dev`, `test`), SQLAlchemy 2 + Alembic | Free, doesn't expire before judging, branches for dev/test |
 | AI | Meta Llama API, `Llama-4-Maverick-17B-128E-Instruct-FP8`, base `https://api.llama.com/compat/v1/` (OpenAI client) | JSON-schema output + tool calling |
-| Hosting | Vercel (Hobby) | Free, public URL until Dec 15 |
+| Hosting | **Render** (sponsor) via `render.yaml` Blueprint: web + api (+ worker from P3), Starter plan | Always on (no sleep), paid by hackathon credits through Dec 15; eligible for Render's sponsor prize |
 | Dev tooling | **APIMatic Context Plugin for PayPal** in Claude Code (sponsor tool) | PayPal API context while building; qualifies for the APIMatic sponsor prize |
 | CI | GitHub Actions: pytest, ruff, `tsc --noEmit`, eslint | Green before every deploy |
 
@@ -42,8 +42,8 @@ The file structure lives in **`PROJECT.md` → File structure** (single source; 
 - **Money correctness:** integer cents everywhere; split is a pure function with property tests (sum of allocations = payment; no allocation > balance; only selected invoices; oldest due first).
 - **Idempotency:** unique keys on `paypal_invoice_number`, `(buyer_id, erp_invoice_no)`, `(buyer_id, memo_no)`, `paypal_capture_id`, `(payment_id, invoice_id)`, `paypal_transaction_id`, `paypal_event_id`; `PayPal-Request-Id` on every PayPal write, keyed by env + row uid (`BACKEND_SCHEMA.md §8`).
 - **Safety:** sandbox guard (refuse to boot if base URL isn't sandbox); no money change without supplier approval; buyer text treated as data.
-- **Security:** statement token ≥ 32 random bytes (URL-safe); supplier routes require `ADMIN_TOKEN`, **except** in `DEMO_MODE` where a signed demo cookie gives supplier access **only to that visitor's own demo buyer** (never to other data); secrets only in Vercel env; no secrets in logs; CORS same-origin.
-- **Performance:** statement page < 1.5 s on 4G for 20 invoices; agent answer < 8 s or fallback; every function under Vercel's time limit.
+- **Security:** statement token ≥ 32 random bytes (URL-safe); supplier routes require `ADMIN_TOKEN`, **except** in `DEMO_MODE` where a signed demo cookie gives supplier access **only to that visitor's own demo buyer** (never to other data); secrets only in Render env (and local `.env`); no secrets in logs; CORS same-origin.
+- **Performance:** statement page < 1.5 s on 4G for 20 invoices; agent answer < 8 s or fallback; every request answers within 10 s (PayPal/LLM calls have their own timeouts).
 - **Reliability:** PayPal calls retry 3× with backoff on 5xx/429; partial failures leave a visible, retryable state.
 - **Observability:** structured logs with request id + PayPal debug_id; audit_log for every money and agent event.
 - **Accessibility:** WCAG AA contrast; status shown as text, not colour only; keyboard usable; mobile-first.
@@ -92,16 +92,16 @@ The order's `custom_id` is our payment `uid`. If PayPal captures but our `/captu
 ## 6b-3. Stuck recording recovery
 Allocation in `RECORDING` for > 5 min, or before any retry of a record call: GET the invoice and search its payment notes for the exact token `[MTC:<allocation uid>]` (brackets included, so one id can't match another). Found → mark `RECORDED` (store transaction id if present). Not found → retry record-payment with the **same** `PayPal-Request-Id`.
 
-## 6b-4. The sweep (how pending work gets done without a worker)
-A single function `services/sync.py::sweep(scope)` processes: unprocessed webhook events, `CREATED` payments > 2 min, `RECORDING`/`FAILED` allocations. It runs (a) at the end of every webhook request (budget: the events for that invoice/order), (b) on statement and supplier page loads, scoped to that buyer / demo session, with a **hard budget: DB-only work plus at most one PayPal call per page load, and it must not delay the page** — run it after the response data is computed, skip it if the request has used > 300 ms, (c) daily via Vercel Cron `GET /api/cron/sweep` protected by `CRON_SECRET` (all rows), configured in `vercel.json`. The admin "sync" button calls the same function.
+## 6b-4. The sweep (all pending work, one function)
+A single function `services/sync.py::sweep(scope)` processes: unprocessed webhook events, `CREATED` payments > 2 min, `RECORDING`/`FAILED` allocations. It runs (a) at the end of every webhook request (that invoice/order only), (b) in the **Render background worker** (`backend/worker.py`, from P3): a loop every **30 s** over all rows, plus the once-a-day reminder drafting (J7) at 09:00 America/New_York. Page loads never run it. The admin "sync" button calls the same function.
 
 ## 6c. Out of scope v1 (explicit)
 Refund/reversal handling of statement payments (shown, not automated), our own email sending, tax/shipping, multi-currency, real ERP connectors, multiple suppliers per account.
 
 ## 7. Configuration
-`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_BASE_URL` (sandbox only), `PAYPAL_WEBHOOK_ID`, `PAYPAL_BUSINESS_EMAIL`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `LLM_API_KEY`, `LLM_MODEL`, `DATABASE_URL` (Neon **pooled** connection string, used by the app), `DATABASE_URL_UNPOOLED` (direct, used only by Alembic migrations), `TEST_DATABASE_URL` (integration tests only: Neon `test` branch locally, Postgres service in CI), `ADMIN_TOKEN`, `DEMO_MODE=true`, `DEMO_COOKIE_SECRET`, `APP_BASE_URL`, `SANDBOX_BUYER_EMAIL` and `SANDBOX_BUYER_PASSWORD` (the sandbox **personal** account — every demo buyer uses this email so it can pay; both shown on the demo page; sandbox only), `IP_HASH_SECRET` (for `demo_rate` IP hashing), `CRON_SECRET` (protects `/api/cron/sweep`), `APP_ENV` (`dev`|`preview`|`prod`|`test`, prefixes PayPal-Request-Id keys).
+`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_BASE_URL` (sandbox only), `PAYPAL_WEBHOOK_ID`, `PAYPAL_BUSINESS_EMAIL`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `LLM_API_KEY`, `LLM_MODEL`, `DATABASE_URL` (Neon **pooled** connection string, used by the app), `DATABASE_URL_UNPOOLED` (direct, used only by Alembic migrations), `TEST_DATABASE_URL` (integration tests only: Neon `test` branch locally, Postgres service in CI), `ADMIN_TOKEN`, `DEMO_MODE=true`, `DEMO_COOKIE_SECRET`, `APP_BASE_URL`, `SANDBOX_BUYER_EMAIL` and `SANDBOX_BUYER_PASSWORD` (the sandbox **personal** account — every demo buyer uses this email so it can pay; both shown on the demo page; sandbox only), `IP_HASH_SECRET` (for `demo_rate` IP hashing), `APP_ENV` (`dev`|`prod`|`test`, prefixes PayPal-Request-Id keys), `API_INTERNAL_URL` (web service only: the api's private address).
 
-**Vercel setup:** start from Vercel's Next.js + FastAPI pattern (`api/index.py` serves FastAPI; `next.config` rewrites `/api/:path*` to the local FastAPI in dev). Python deps in `requirements.txt` (`fastapi`, `sqlalchemy`, `psycopg[binary]`, `httpx`, `openai`, `pydantic`). Alembic migrations run from local/CI against Neon, never in the Vercel build. PayPal JS SDK loads with `buyer-country=US` in sandbox so the Venmo button can render. Register the webhook URL (`<APP_BASE_URL>/api/paypal/webhook`) in the PayPal developer dashboard for the sandbox app and copy its id to `PAYPAL_WEBHOOK_ID`.
+**Render setup:** `render.yaml` Blueprint defines the services (api: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`; web: `npm start` with `/api/*` rewritten to `API_INTERNAL_URL`; worker from P3: `python -m backend.worker`), plan Starter, shared env group, secrets `sync: false`. Python deps in `requirements.txt`. Alembic migrations are run by hand against Neon (dev, then prod at merge), never in the build. PayPal JS SDK loads with `buyer-country=US` in sandbox so the Venmo button can render. Register the webhook URL (`<APP_BASE_URL>/api/paypal/webhook`) in the PayPal developer dashboard for the sandbox app and copy its id to `PAYPAL_WEBHOOK_ID`.
 
 ## 8. Testing
 - Unit: money, split (Hypothesis property tests), importer, validators.
@@ -112,9 +112,9 @@ Refund/reversal handling of statement payments (shown, not automated), our own e
 ## 9. Open checks (do in P1–P3)
 1. PUT adjustment on a PARTIALLY_PAID invoice.
 2. Venmo button renders in sandbox; whether a sandbox Venmo payment can complete.
-3. Webhook delivery to Vercel URL; signature verification.
-4. Llama tool-calling latency within the function time limit.
-5. The Llama key works from Vercel (P0 smoke call), and the exact model id is available on the account.
+3. Webhook delivery to the Render URL; signature verification.
+4. Llama tool-calling latency acceptable for the ask box (< 8 s).
+5. The Llama key works from Render (P0 deep health), and the exact model id is available on the account.
 6. Record-payment response returns a PayPal transaction id (dedupe still works via the `[MTC:<uid>]` note token if not).
 7. Llama: tool calling and `response_format: json_schema` together in one call.
 8. PayPal accepts an `invoice_date` in the past and a `DUE_ON_DATE_SPECIFIED` due date in the past (needed for the overdue demo invoice). Fallback: create with today's date and keep our dates as the truth (note on supplier screen).

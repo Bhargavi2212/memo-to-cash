@@ -109,7 +109,7 @@ Other labels: RETURN_CLAIM → RETURN_CHECK proposal with evidence MATCH / NO_RE
 4. Statement and supplier view reflect it on next load.
 
 ## 7. Journey J7 — Reminder
-1. Daily cron (or supplier opens dashboard) → find invoices past due with no promise → agent drafts `ReminderDraft` → proposal REMINDER.
+1. Once a day the background worker (09:00 America/New_York) → find invoices past due with no promise → agent drafts `ReminderDraft` → proposal REMINDER.
 2. Supplier approves → check `reminders_sent` (< 2 today) → `POST /invoices/{id}/remind` → PayPal emails the buyer → audit.
 
 ## 7b. Journey J8 — Supplier records a cheque

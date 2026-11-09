@@ -5,8 +5,8 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 
 ## Phase P0 — Skeleton live (Mon)
 **Spec: `docs/phases/P0.md` (source of truth for tasks, setup and done-when).** Summary:
-- [ ] Next.js (TS, Tailwind v4) at repo root; FastAPI at `api/index.py`; `vercel.json` sends `/api/*` to Python (maxDuration 30)
-- [ ] Neon via Vercel (prod = `main` branch; local + Preview = `dev` branch); Alembic with an empty baseline (tables in P1)
+- [ ] Next.js (TS, Tailwind v4) at repo root; FastAPI at `backend/main.py`; `render.yaml` Blueprint: web + api services (Starter), web rewrites `/api/*` to api
+- [ ] Neon (prod = `main` branch; local = `dev`; tests = `test`); Alembic with an empty baseline (tables in P1)
 - [ ] `backend/core/config.py` (pydantic-settings, `.env`, sandbox guard; only `PAYPAL_BASE_URL`, `APP_ENV`, `DATABASE_URL` required)
 - [ ] `/api/health` → `{ok, sandbox, db, env}`; `/api/health/deep` (admin) → `{db, paypal_token, llm:{ok, model, ms}}`
 - [ ] Llama key + model id confirmed (`python -m scripts.llama_smoke`)
@@ -41,9 +41,9 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 - [ ] Webhook route: verify signature, store, process `INVOICING.INVOICE.PAID/CANCELLED/REFUNDED`, `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.*`
 - [ ] Proposals API + decide → adjustment PUT / remind (2/day guard)
 - [ ] Record off-PayPal payment (J8, same RECORDING flow) + copy statement link
-- [ ] `services/sync.py::sweep` + `/api/cron/sweep` (CRON_SECRET) + `vercel.json` cron (daily)
+- [ ] `services/sync.py::sweep` + `backend/worker.py` (loop every 30 s + daily reminder drafting) + worker service added to `render.yaml`
 - [ ] Register webhook URL in PayPal dashboard → `PAYPAL_WEBHOOK_ID`; dedupe by transaction id (TRD §6b)
-- [ ] **Open check 3:** webhook delivery to Vercel
+- [ ] **Open check 3:** webhook delivery to Render
 **Tests:** webhook dedupe; **webhook skipped while an allocation is RECORDING**, processed by the next sweep; `PAYMENT.CAPTURE.COMPLETED` finishes a lost capture; paid-on-PayPal-page backfill; reminder limit (America/New_York); demo cookie can't reach other buyers; demo can't import.
 **Done when:** paying one invoice on PayPal's page updates the statement; approving a deduction changes the PayPal invoice.
 
@@ -61,11 +61,11 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 - [ ] README: one section per judging criterion with evidence; limits & workarounds; run locally; tests & eval numbers; architecture diagram
 - [ ] Full sandbox smoke run on the production URL
 - [ ] Record video (script below), upload public YouTube
-- [ ] Devpost text, tools section (Meta Llama API; **APIMatic Context Plugin for PayPal** — how it was used, with commit examples), sponsor-tool field set to APIMatic, README section "Built with APIMatic Context Plugin" linking `docs/APIMATIC.md`, testing instructions
+- [ ] Devpost text, tools section (Meta Llama API; **APIMatic Context Plugin for PayPal** — how it was used, with commit examples), sponsor-tool field set to **APIMatic and Render**, README section on Render (Blueprint, services, worker), README section "Built with APIMatic Context Plugin" linking `docs/APIMATIC.md`, testing instructions
 - [ ] Stage One checklist all ticked → **Submit**
 
 ### Stage One checklist
-- [ ] Public repo, MIT license visible in About · [ ] Working Vercel URL free until Dec 15 · [ ] Public YouTube < 3:00, no copyrighted music/logos · [ ] PayPal central + AI meaningful · [ ] Tools section · [ ] Testing instructions · [ ] No real client names anywhere · [ ] Submitted (not draft)
+- [ ] Public repo, MIT license visible in About · [ ] Working Render URL free for judges until Dec 15 (Starter services, credits checked) · [ ] Public YouTube < 3:00, no copyrighted music/logos · [ ] PayPal central + AI meaningful · [ ] Tools section · [ ] Testing instructions · [ ] No real client names anywhere · [ ] Submitted (not draft)
 
 ### Video script (≤ 3:00)
 - 0:00–0:20 Pain: memo out 2 months → invoice email → buyer can't tell what they owe. QuickBooks/Square users asking for one payment for many invoices; PayPal Invoicing doesn't have it.

@@ -20,7 +20,7 @@ Buyers who take goods **on memo** (consignment) get **one statement link** that 
 ERP export → mirror invoices as **real PayPal invoices** → buyer **statement link** → **one PayPal checkout** (PayPal, Pay Later, Venmo, bank) → **split** across invoices → **recorded on each PayPal invoice** → webhooks keep it in sync → **agent** answers questions + turns messages into **proposals** → supplier approves → PayPal invoice updated / PayPal reminder sent.
 
 ## Stack
-Next.js (Vercel) · Python FastAPI as Vercel functions · Neon Postgres · APIMatic Context Plugin for PayPal (build tooling, sponsor) · PayPal Invoicing v2, Orders v2, JS SDK, Webhooks (sandbox) · Meta Llama API (Llama 4 Maverick, JSON-schema output, tool calling).
+Next.js + Python FastAPI + background worker on **Render** (sponsor) · Neon Postgres · APIMatic Context Plugin for PayPal (build tooling, sponsor) · PayPal Invoicing v2, Orders v2, JS SDK, Webhooks (sandbox) · Meta Llama API (Llama 4 Maverick, JSON-schema output, tool calling).
 
 ## File structure
 ✅ = exists now · everything else is created in the phase shown. Update this tree when you add/move files (same commit).
@@ -43,7 +43,7 @@ memo-to-cash/
 │   └── sandbox_smoke.py            P5 end-to-end run against the real sandbox
 │
 ├── package.json · next.config.ts · tsconfig.json · postcss.config.mjs · eslint.config.mjs · next-env.d.ts   P0 (Tailwind v4: tokens in app/globals.css, no tailwind.config)
-├── vercel.json                     P0 (Python functions) · P3 adds the daily cron
+├── render.yaml                     P0 Render Blueprint (web + api, Starter) · P3 adds the worker
 ├── requirements.txt · requirements-dev.txt · pyproject.toml (ruff, pytest)  P0
 ├── alembic.ini                     P0 (migrations use DATABASE_URL_UNPOOLED)
 ├── .github/workflows/ci.yml        P0 ruff · pytest · tsc · eslint
@@ -63,14 +63,14 @@ memo-to-cash/
 │   ├── api.ts                      P2 typed API client
 │   └── money.ts                    P2 the only money formatter
 │
-├── api/
-│   └── index.py                    P0 Vercel Python entry → FastAPI app
 ├── backend/
+│   ├── main.py                     P0 FastAPI app (uvicorn) — Render api service
+│   ├── worker.py                   P3 background worker: sweep every 30 s + daily reminder drafting
 │   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2
 │   ├── db/         session.py P0 · models.py P1 · migrations/ (Alembic) P0–P1
 │   ├── paypal/     client.py P1 · invoices.py P1 · orders.py P2 · webhooks.py P3
 │   ├── services/   importer.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · sync.py (sweep) P3 · proposals.py P3 · audit.py P1
-│   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · supplier.py P3 · paypal_webhook.py P3 · cron.py P3
+│   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · supplier.py P3 · paypal_webhook.py P3
 │   └── agent/      llm.py P0 (smoke call) → P4 · tools.py · schemas.py · answer.py · triage.py · reminders.py · prompts/*.md   P4
 ├── seed/
 │   ├── demo_seed.py                P1 builds the §Seed data (relative dates) → runs the importer
@@ -108,9 +108,10 @@ memo-to-cash/
 | P4 Agent + eval | ⬜ | |
 | P5 Ship + submit | ⬜ | Target Wed Nov 11, 11pm ET |
 
-Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Vercel · 4 Llama latency · 5 Llama key + model id · 6 transaction id in record response · 7 tool calling + json_schema together · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
+Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Render · 4 Llama latency · 5 Llama key + model id · 6 transaction id in record response · 7 tool calling + json_schema together · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
 
 ## Decisions log (newest first — add one line per decision)
+- 2026-11-09 **Switched hosting to Render** (sponsor): Blueprint `render.yaml`, Starter plan (no sleep), web (Next.js) + api (FastAPI) in P0, background worker in P3 (sweep every 30 s + daily reminders) — replaces page-load sweep and the cron endpoint. DB stays on Neon (Render free Postgres expires after 30 days). Sponsor prizes in play: APIMatic and Render (only one can be won).
 - 2026-11-09 Capture holds the buyer lock across the PayPal capture call (only exception to "PayPal after commit"). Integration tests use real Postgres (Neon `test` branch locally, Postgres service in CI). Docs pushed before Vercel import.
 - 2026-11-09 Sponsor prize: target **APIMatic** (Context Plugin for PayPal used in Claude Code to build the PayPal integration; low cost, fits how we build). **Not** AG Grid for now (needs AG Studio + Studio Agent Framework rebuild of supplier side, ~1 day; Supplora already strong there) — revisit only if P4 ends early. Render/Bryntum/Channel3 don't fit; others have no prize. Only one sponsor prize can be won per project.
 - 2026-11-09 Review 3: repeated `/capture` on a captured payment returns the existing receipt (200); 409 only for STATEMENT_CHANGED; approved-but-uncaptured orders are captured (CHECKOUT.ORDER.APPROVED webhook or sweep) after the split check; page-load sweep is DB-only + max 1 PayPal call and never delays the page; `custom_id` = payment uid everywhere; J6 follows TRD §6b.
@@ -119,10 +120,10 @@ Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhoo
 - 2026-11-09 Build the missing capability (one payment for many PayPal invoices via Orders + record per invoice), not "one statement invoice". Accept `MARKED_AS_PAID` and document it.
 - 2026-11-09 Our ledger decides balances; PayPal status mirrored, mismatches flagged.
 - 2026-11-09 Each demo visitor gets their own copy (no shared reset).
-- 2026-11-09 Hosting Vercel; Next.js + Python functions; Neon; Meta Llama.
+- 2026-11-09 (superseded) Hosting Vercel; Next.js + Python functions; Neon; Meta Llama.
 - 2026-11-09 Pay Later shown as offered, not pitched as B2B financing (consumer credit).
 - 2026-11-09 No WhatsApp/screenshot/voice intake (adds steps for users).
 - 2026-11-08 Lane: memo/consignment B2B — empty in this hackathon (404 repos checked).
 
 ## Links
-Repo: https://github.com/Bhargavi2212/memo-to-cash · Live: _(add after P0)_ · Video: _(P5)_ · Devpost: _(P5)_
+Repo: https://github.com/Bhargavi2212/memo-to-cash · Live: _(add after P0 — https://memo-to-cash-web.onrender.com)_ · Video: _(P5)_ · Devpost: _(P5)_
