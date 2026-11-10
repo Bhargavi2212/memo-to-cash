@@ -187,6 +187,9 @@ class PayPal:
                     failure = PayPalError(
                         "TIMEOUT", f"no answer in {TIMEOUT_S:.0f} s", None, [], None, True
                     )
+                except httpx.TransportError as e:  # connection refused, DNS, reset: transient
+                    log.warning("paypal %s %s -> network error %s", method, path, type(e).__name__)
+                    failure = PayPalError("NETWORK_ERROR", type(e).__name__, None, [], None, True)
                 else:
                     self._log(method, path, resp, start)
                     if resp.status_code == 401 and not refreshed:

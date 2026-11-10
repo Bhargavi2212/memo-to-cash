@@ -206,3 +206,10 @@ async def test_logs_have_debug_id_but_no_secrets_or_bodies(settings, caplog):
         assert leak not in text
     # the error itself never carries the request body either
     assert EMAIL not in json.dumps(vars(pp.PayPalError("n", "m", None, [], 400)))
+
+
+async def test_network_errors_are_transient_not_crashes(settings, fresh_cache):
+    rec = Recorder(*[httpx.ConnectError("refused")] * 4)
+    with pytest.raises(pp.PayPalError) as e:
+        await make(settings, rec).request("GET", "/x")
+    assert e.value.transient and e.value.name == "NETWORK_ERROR" and len(rec.calls) == 4
