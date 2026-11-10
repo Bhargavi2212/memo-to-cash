@@ -31,7 +31,7 @@ services:
     plan: 0.5c-512mb # 0.5 CPU / 512 MB (formerly "Starter")
     region: virginia
     branch: main
-    autoDeployTrigger: checksPass # deploy main only after GitHub CI is green
+    autoDeployTrigger: commit # checksPass never fired on Render (P1 B11); main only gets green-CI merges
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --proxy-headers
     healthCheckPath: /api/health
@@ -66,7 +66,7 @@ services:
     plan: 0.5c-512mb # 0.5 CPU / 512 MB (formerly "Starter")
     region: virginia
     branch: main
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: commit
     buildCommand: npm ci && npm run build
     startCommand: npm start
     envVars:
