@@ -5,7 +5,7 @@ server-side prepared statements (prepare_threshold=None) because the app connect
 through Neon's connection pooler.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from sqlalchemy import create_engine
@@ -48,3 +48,9 @@ def get_session() -> Iterator[Session]:
         yield session
     finally:
         session.close()
+
+
+def get_session_factory() -> "Callable[[], Session]":
+    """FastAPI dependency for services that open their own transactions (PayPal calls happen
+    between them, so one request-scoped session isn't enough)."""
+    return SessionLocal

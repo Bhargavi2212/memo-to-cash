@@ -4,17 +4,21 @@ Auth = the statement token in the path (BACKEND_SCHEMA §8); every query is scop
 token's buyer (invariant 7).
 """
 
+from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, StrictInt
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from backend.core.config import Settings, get_settings
 from backend.core.dates import today_ny
 from backend.core.split import SplitError
-from backend.db.session import get_session
+from backend.db.session import get_session, get_session_factory
+from backend.paypal.client import PayPal, get_paypal
+from backend.services import payments
 from backend.services import statement as svc
 
 router = APIRouter(prefix="/api")
@@ -52,3 +56,98 @@ def preview(token: str, body: PreviewIn, session: Annotated[Session, Depends(get
         return _error(404, *NOT_FOUND)
     except SplitError as e:
         return _error(422, e.code, e.message)
+
+
+# ---------- payments (P2 D4, D5, D11, D13, R4, R14) ----------
+
+
+class OrderIn(BaseModel):
+    invoice_ids: list[StrictInt] | None = None
+    amount_cents: StrictInt | None = None
+    funding_source: str | None = None  # the JS SDK's data.paymentSource (R3)
+
+
+class OrderOut(BaseModel):
+    paypal_order_id: str
+
+
+class CaptureIn(BaseModel):
+    paypal_order_id: str
+
+
+def _pay_error(e: payments.PaymentError) -> JSONResponse:
+    err: dict[str, str] = {"code": e.code, "message": e.message}
+    if e.debug_id:
+        err["paypal_debug_id"] = e.debug_id
+    return JSONResponse({"error": err}, status_code=e.status)
+
+
+@router.post("/statement/{token}/order", response_model=OrderOut)
+async def create_order(
+    token: str,
+    body: OrderIn,
+    pp: Annotated[PayPal, Depends(get_paypal)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+):
+    try:
+        o = await payments.create_order(
+            session_factory, pp, token, body.invoice_ids, body.amount_cents, body.funding_source
+        )
+    except svc.StatementNotFoundError:
+        return _error(404, *NOT_FOUND)
+    except SplitError as e:
+        return _error(422, e.code, e.message)
+    except payments.PaymentError as e:
+        return _pay_error(e)
+    return OrderOut(paypal_order_id=o.paypal_order_id)
+
+
+def _receipt(session_factory: Callable[[], Session], token: str, payment_id: int) -> svc.Receipt:
+    with session_factory() as s:
+        return svc.get_receipt(s, token, payment_id)
+
+
+@router.post("/statement/{token}/capture", response_model=svc.Receipt)
+async def capture(
+    token: str,
+    body: CaptureIn,
+    background: BackgroundTasks,
+    pp: Annotated[PayPal, Depends(get_paypal)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+):
+    """Answers right after the capture commit; recording on PayPal runs afterwards as a
+    BackgroundTask and the receipt page polls (R14). A repeat returns the same receipt."""
+    try:
+        r = await payments.capture_payment(session_factory, pp, token, body.paypal_order_id)
+        receipt = await run_in_threadpool(_receipt, session_factory, token, r.payment_id)
+    except svc.StatementNotFoundError:
+        return _error(404, *NOT_FOUND)
+    except payments.PaymentError as e:
+        return _pay_error(e)
+    if any(a.record_state == "PENDING" for a in receipt.allocations):
+        background.add_task(payments.record_allocations, session_factory, pp, r.payment_id)
+    return receipt
+
+
+@router.get("/statement/{token}/payments/{payment_id}", response_model=svc.Receipt)
+def get_receipt(token: str, payment_id: int, session: Annotated[Session, Depends(get_session)]):
+    try:
+        return svc.get_receipt(session, token, payment_id)
+    except svc.StatementNotFoundError:
+        return _error(404, *NOT_FOUND)
+
+
+@router.post("/statement/{token}/payments/{payment_id}/refresh", response_model=svc.Receipt)
+async def refresh(
+    token: str,
+    payment_id: int,
+    pp: Annotated[PayPal, Depends(get_paypal)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+):
+    """'Retry updating PayPal' (R4): resolve_recording for this payment only, then the receipt."""
+    try:
+        await run_in_threadpool(_receipt, session_factory, token, payment_id)  # scope check first
+        await payments.resolve_recording(session_factory, pp, payment_id)
+        return await run_in_threadpool(_receipt, session_factory, token, payment_id)
+    except svc.StatementNotFoundError:
+        return _error(404, *NOT_FOUND)

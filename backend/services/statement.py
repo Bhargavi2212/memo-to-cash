@@ -335,3 +335,65 @@ def preview(
             for i, c in split
         ],
     )
+
+
+# ---------- receipt (P2 D11) ----------
+
+
+class ReceiptAllocation(BaseModel):
+    invoice_no: str
+    amount_cents: int
+    recorded: bool
+    record_state: str  # PENDING | RECORDING | RECORDED | FAILED
+    due_after_cents: int  # the invoice's due now, per our ledger
+    paypal_url: str | None
+
+
+class Receipt(BaseModel):
+    payment_id: int
+    status: str  # CAPTURED | CAPTURE_PENDING
+    paypal_capture_id: str | None
+    amount_cents: int
+    received_at: date | None
+    allocations: list[ReceiptAllocation]
+    new_owed_cents: int
+    credit_cents: int  # this payment's unapplied money
+    resplit: bool  # allocations differ from the split shown when ordering (R15)
+
+
+def get_receipt(session: Session, token: str, payment_id: int) -> Receipt:
+    """Scoped to the token's buyer; only payments that reached PayPal capture have one."""
+    buyer = find_buyer(session, token)
+    p = session.get(Payment, payment_id)
+    if p is None or p.buyer_id != buyer.id or p.status not in ("CAPTURED", "CAPTURE_PENDING"):
+        raise StatementNotFoundError
+    rows, _ = open_invoices(session, buyer.id)
+    by_id = {i.id: i for i in rows}
+    allocs = list(
+        session.scalars(
+            select(Allocation).where(Allocation.payment_id == p.id).order_by(Allocation.id)
+        )
+    )
+    planned = {(int(x["invoice_id"]), int(x["amount_cents"])) for x in p.planned_split or []}
+    actual = {(a.invoice_id, a.amount_cents) for a in allocs}
+    return Receipt(
+        payment_id=p.id,
+        status=p.status,
+        paypal_capture_id=p.paypal_capture_id,
+        amount_cents=p.amount_cents,
+        received_at=p.received_at.date() if p.received_at else None,
+        allocations=[
+            ReceiptAllocation(
+                invoice_no=by_id[a.invoice_id].erp_invoice_no,
+                amount_cents=a.amount_cents,
+                recorded=a.record_state == "RECORDED",
+                record_state=a.record_state,
+                due_after_cents=by_id[a.invoice_id].total_cents - by_id[a.invoice_id].paid_cents,
+                paypal_url=by_id[a.invoice_id].payer_view_url,
+            )
+            for a in allocs
+        ],
+        new_owed_cents=sum(max(0, i.total_cents - i.paid_cents) for i in rows),
+        credit_cents=p.unapplied_cents,
+        resplit=bool(allocs) and actual != planned,
+    )

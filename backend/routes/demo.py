@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.core.config import Settings, get_settings
-from backend.db.session import SessionLocal
+from backend.db.session import get_session_factory
 from backend.paypal.client import PayPal, get_paypal
 from backend.services import demo
 
@@ -23,10 +23,6 @@ class DemoStartOut(BaseModel):
     statement_token: str
     buyer_id: int
     ms: int
-
-
-def get_session_factory() -> Callable[[], Session]:
-    return SessionLocal
 
 
 def _error(status: int, code: str, message: str, debug_id: str | None = None) -> JSONResponse:

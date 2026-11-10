@@ -542,3 +542,137 @@ async def test_record_overall_cap(db, pp, fake, buyer, settings, monkeypatch):
     await pay.record_allocations(SessionLocal, pp, o.payment_id)
     assert time.perf_counter() - t0 < 2.0
     assert {v.record_state for v in allocs(db, o.payment_id).values()} == {"RECORDING"}
+
+
+# ======================================== routes (step 8: D11, D13, R4, R14, D2)
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from backend.core.config import get_settings  # noqa: E402
+from backend.main import app  # noqa: E402
+from backend.paypal.client import get_paypal  # noqa: E402
+
+
+def _web(settings):
+    return settings.model_copy(
+        update={
+            "app_base_url": "https://memo.example",
+            "paypal_business_email": "supplier@example.com",
+        }
+    )
+
+
+@pytest.fixture
+def api(db, fake, settings):
+    s = _web(settings)
+    app.dependency_overrides[get_settings] = lambda: s
+    app.dependency_overrides[get_paypal] = lambda: PayPal(s, transport=fake.transport())
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+async def mirrored(buyer, fake, settings):
+    s = _web(settings)
+    pp_ = PayPal(s, transport=fake.transport())
+    assert (await mirror_invoices(buyer.id, pp_, s, SessionLocal, today=D)).ok
+
+
+def base(buyer):
+    return f"/api/statement/{buyer.statement_token}"
+
+
+def post_order(api, buyer, **body):
+    r = api.post(base(buyer) + "/order", json=body)
+    assert r.status_code == 200, r.text
+    return r.json()["paypal_order_id"]
+
+
+async def test_route_order_capture_receipt(db, api, fake, buyer, settings):
+    await mirrored(buyer, fake, settings)
+    oid = post_order(api, buyer, amount_cents=500000, funding_source="paypal")
+    fake.approve(oid)
+    r = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid})
+    assert r.status_code == 200, r.text
+    rc = r.json()
+    # built right after the capture commit, before the BackgroundTask recorded anything (R14)
+    assert rc["status"] == "CAPTURED" and rc["amount_cents"] == 500000 and rc["resplit"] is False
+    got = [(a["invoice_no"], a["amount_cents"], a["recorded"]) for a in rc["allocations"]]
+    assert got == [("INV-1038", 350000, False), ("INV-1042", 150000, False)]
+    assert [a["due_after_cents"] for a in rc["allocations"]] == [0, 200000]
+    assert rc["new_owed_cents"] == 342000 and rc["credit_cents"] == 0
+    assert all("/invoice/p/#" in a["paypal_url"] for a in rc["allocations"])
+    # ...and the BackgroundTask has run by now (TestClient runs it after the response)
+    again = api.get(base(buyer) + f"/payments/{rc['payment_id']}").json()
+    assert [a["recorded"] for a in again["allocations"]] == [True, True]
+    r2 = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid})  # repeat → same
+    assert r2.status_code == 200 and r2.json()["payment_id"] == rc["payment_id"]
+    assert fake.ops().count("order_capture") == 1
+
+
+async def test_route_error_codes(db, api, fake, buyer, settings):
+    assert api.post("/api/statement/nope/order", json={}).status_code == 404
+    r = api.post(base(buyer) + "/order", json={"amount_cents": 0})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "AMOUNT_NOT_POSITIVE"
+    assert api.post(base(buyer) + "/order", json={"amount_cents": 5000.5}).status_code == 422
+    oid = post_order(api, buyer, amount_cents=1000)
+    r = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid})  # not approved
+    assert r.status_code == 409 and r.json()["error"]["code"] == "ORDER_NOT_APPROVED"
+    fake.approve(oid)
+    declined = error(422, "UNPROCESSABLE_ENTITY", details=[{"issue": "INSTRUMENT_DECLINED"}])
+    fake.fail("order_capture", declined)
+    r = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid})
+    assert r.status_code == 402 and r.json()["error"]["code"] == "PAYMENT_DECLINED"
+    assert r.json()["error"]["paypal_debug_id"] == "fake-debug"
+    fake.fail("order_capture", httpx.ReadTimeout("slow"))
+    r = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid})
+    assert r.status_code == 503 and r.json()["error"]["code"] == "CAPTURE_UNCONFIRMED"
+    r = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid})  # "Check again" (R4)
+    assert r.status_code == 200 and r.json()["status"] == "CAPTURED"
+    r = api.post(base(buyer) + "/capture", json={"paypal_order_id": "ORDER-NOPE"})
+    assert r.status_code == 404
+    assert api.get(base(buyer) + "/payments/999999").status_code == 404
+
+
+async def test_route_refresh_resolves_an_unrecorded_allocation_once(db, api, fake, buyer, settings):
+    await mirrored(buyer, fake, settings)
+    oid = post_order(api, buyer, amount_cents=500000)
+    fake.approve(oid)
+    fake.fail("record", error(500, "INTERNAL_SERVER_ERROR"))  # first record: transient
+    pid = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid}).json()["payment_id"]
+    rc = api.get(base(buyer) + f"/payments/{pid}").json()
+    assert sorted(a["record_state"] for a in rc["allocations"]) == ["RECORDED", "RECORDING"]
+    fake.calls.clear()
+    rc = api.post(base(buyer) + f"/payments/{pid}/refresh").json()
+    assert [a["recorded"] for a in rc["allocations"]] == [True, True]
+    assert fake.ops().count("record") == 1  # one call for the one unresolved allocation
+
+
+async def test_statement_lists_payments_notices_and_credit(db, api, fake, buyer, settings):
+    await mirrored(buyer, fake, settings)
+    # captured, recording failed → listed + RECORDING_PENDING
+    oid = post_order(api, buyer, amount_cents=100000)
+    fake.approve(oid)
+    fake.fail("record", error(400, "INVALID_REQUEST"))
+    paid = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid}).json()
+    # two orders for the rest: one captured, one voided → PAYMENT_VOIDED notice, never listed
+    oid2 = post_order(api, buyer, amount_cents=742000)
+    oid3 = post_order(api, buyer, amount_cents=742000)
+    fake.approve(oid2)
+    fake.approve(oid3)
+    assert api.post(base(buyer) + "/capture", json={"paypal_order_id": oid2}).status_code == 200
+    assert api.post(base(buyer) + "/capture", json={"paypal_order_id": oid3}).status_code == 409
+    p = db.get(Payment, paid["payment_id"])  # credit on the first payment
+    p.unapplied_cents = 2500
+    db.commit()
+
+    s = api.get(base(buyer)).json()
+    listed = {(x["status"], x["amount_cents"]) for x in s["payments"]}
+    assert listed == {("CAPTURED", 100000), ("CAPTURED", 742000)}
+    first = next(x for x in s["payments"] if x["amount_cents"] == 100000)
+    assert first["applied"] == [{"invoice_no": "INV-1038", "amount_cents": 100000}]
+    kinds = sorted(n["kind"] for n in s["notices"])
+    assert kinds == ["PAYMENT_CREDITED", "PAYMENT_VOIDED", "RECORDING_PENDING"]
+    credited = next(n for n in s["notices"] if n["kind"] == "PAYMENT_CREDITED")
+    assert credited["amount_cents"] == 2500
+    assert s["credit_cents"] == 2500 and s["owed_cents"] == 0
