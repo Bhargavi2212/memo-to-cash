@@ -8,7 +8,7 @@ import logging
 
 from fastapi import FastAPI
 
-from backend.routes import health
+from backend.routes import demo, health
 
 # PayPal/LLM code logs method, path, status, ms and debug_id — never bodies with emails or tokens.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -20,3 +20,4 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(health.router)
+app.include_router(demo.router)
