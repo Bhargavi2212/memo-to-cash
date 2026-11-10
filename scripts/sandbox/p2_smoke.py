@@ -142,10 +142,17 @@ async def finish() -> int:
                 "[R2] same Request-Id after a decline -> captured: PayPal does NOT replay declines"
             )
         except PayPalError as e:
-            print(
-                f"[R2] same Request-Id after a decline -> {e.name} {sorted(orders.issues(e))}: "
-                "PayPal REPLAYS the decline -> the -<n> suffix (R2) is required"
-            )
+            found = sorted(orders.issues(e))
+            if "INSTRUMENT_DECLINED" in found:
+                print(
+                    "[R2] same Request-Id after a decline -> INSTRUMENT_DECLINED again: PayPal "
+                    "REPLAYS the decline -> the -<n> suffix (R2) is required"
+                )
+            else:
+                print(
+                    f"[R2] same Request-Id after a decline -> a DIFFERENT error {found}: not a "
+                    "replay (the real capture failed on its own)"
+                )
     if captured is None:
         captured = await orders.capture(pp, order_id, uid, 1 if decline_seen else 0)
 
