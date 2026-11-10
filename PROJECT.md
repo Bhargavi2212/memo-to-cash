@@ -69,11 +69,11 @@ memo-to-cash/
 ├── backend/
 │   ├── main.py                     P0 FastAPI app (uvicorn) — Render api service
 │   ├── worker.py                   P3 background worker: sweep every 30 s + daily reminder drafting
-│   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2
+│   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2 · logging.py P2 (statement tokens out of access logs)
 │   ├── db/         session.py P0 · models.py P1 · migrations/ (Alembic) P0–P1
 │   ├── paypal/     client.py P1 · invoices.py P1 · orders.py P2 · webhooks.py P3
 │   ├── services/   importer.py P1 · mirror.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · sync.py (sweep) P3 · proposals.py P3 · audit.py P1
-│   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · supplier.py P3 · paypal_webhook.py P3
+│   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · config.py P2 (`GET /api/config`) · supplier.py P3 · paypal_webhook.py P3
 │   └── agent/      llm.py P0 (smoke call) → P4 · tools.py · schemas.py · answer.py · triage.py · reminders.py · prompts/*.md   P4
 ├── seed/
 │   ├── __init__.py · demo_seed.py  P1 `python -m seed.demo_seed`: one demo copy on dev with real sandbox invoices (same path as /api/demo/start)
