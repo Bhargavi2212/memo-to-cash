@@ -110,4 +110,11 @@ All six results → PROJECT.md decisions log + TRD §9 in the step 4 commit.
 > Blockers G1/G2 are not in the estimate; waiting on them adds wall-clock time, not build time (steps 5–7 can run meanwhile).
 
 ## 6. Build log
-_(B1, B2… added during Stage 4)_
+| # | What happened | Decision |
+|---|---|---|
+| B1 | Plan order followed G24 (APIMatic sign-in pending): step 1 → 5 → 6 → 7. | DB steps first; PayPal steps (2–4, 8) wait for the plugin to answer in a session. |
+| B2 | The importer tests need the seed file, and `build_csv(D, buyer_email)` is pure. | Written in step 7 (`services/demo.py`) instead of step 9; `start_demo` stays in step 9. |
+| B3 | "Unknown memo/invoice" (BACKEND_SCHEMA §6) didn't say whether a row may refer to a memo/invoice that exists only in the DB. | Every referenced memo/invoice must be declared in the same file (an ERP export is a snapshot). Stated in the importer docstring; doc line to add to §6 in step 11. |
+| B4 | A mirrored invoice later adjusted in P3 would have failed re-import if `total_cents` (incl. adjustments) were compared. | Immutability compares dates + item lines (SKU, amount) only; an unmirrored invoice's new total = items + existing adjustment lines. |
+| B5 | Extra rule found while writing the importer: an INVOICE_LINE's memo must be the invoice's memo (one invoice = one memo, PRD §8). | Row error; tested. To add to BACKEND_SCHEMA §6 list in step 11. |
+| B6 | Step 5: `DROP SCHEMA public` works on the Neon `test` branch (G15 resolved); full suite with db tests ≈ 9 s locally. | — |
