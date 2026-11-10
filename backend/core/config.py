@@ -98,3 +98,8 @@ def sqlalchemy_url(url: str) -> str:
 
 
 settings = load_settings()
+
+
+def get_settings() -> Settings:
+    """FastAPI dependency (P1 D26): routes take settings from here so tests can override them."""
+    return settings
