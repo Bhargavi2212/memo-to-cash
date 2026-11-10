@@ -103,7 +103,7 @@ memo-to-cash/
 | Phase | State | Notes |
 |---|---|---|
 | Research + docs | ✅ done | Nov 8–9 |
-| P0 Skeleton live | ⬜ | |
+| P0 Skeleton live | ✅ done | Nov 9: web + api live on Render (`0.5c-512mb`, virginia), Neon prod migrated to 0001, CI green, deep health all true (`muse-ember-1.0`, 1.6 s) |
 | P1 Data + PayPal mirror | ⬜ | |
 | P2 Statement + one payment for many invoices | ⬜ | |
 | P3 Supplier side + webhooks | ⬜ | |
@@ -113,6 +113,7 @@ memo-to-cash/
 Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Render · 4 LLM latency on real statements · ~~5 LLM key + model id~~ ✅ P0 · 6 transaction id in record response · ~~7 tool calling + json_schema together~~ ✅ P0 · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
 
 ## Decisions log (newest first — add one line per decision)
+- 2026-11-09 P0 live on Render. Blueprint needed plan id `0.5c-512mb` (Render renamed `starter`); `autoDeployTrigger: checksPass` accepted; service URLs have no suffix. Cost: $7/mo per service, no Render spend cap exists → budget section pending (limit + Muse price from Bhargavi).
 - 2026-11-09 **LLM: Meta Model API instead of the Llama API.** New Meta developer keys (`LLM_…`) only work at `https://api.meta.ai/v1` (Muse models); `api.llama.com` returns 401. P0 test of all 7 chat models (json_schema, reasoning low): `muse-ember-1.0` ~1.1 s and correct, tool call + json_schema 3/3 in 1.2–1.8 s → default; `muse-spark-1.3` (3.6–5.4 s, correct) = backup; P4 eval decides. Never a `-contributor` model. `LLM_MODEL` + `LLM_REASONING_EFFORT` are settings; cut-off reply (`finish_reason=length`) or invalid JSON = fallback. Closes open checks 5 and 7.
 - 2026-11-09 Neon project `memo-to-cash` (`delicate-moon-76690980`, aws-us-east-1, Postgres 17), branches `main` (prod) / `dev` / `test`, created with the Neon CLI; `dev` migrated to 0001.
 - 2026-11-09 P0 plan review (`docs/phases/P0-plan.md` G1–G16): Neon AWS US East + Render `virginia`; `uvicorn` in `requirements.txt`; settings `extra="ignore"`; psycopg `prepare_threshold=None` behind Neon's pooler; OpenAPI under `/api`; proxy passes `X-Forwarded-For` unchanged and returns 502 `API_UNREACHABLE`; never set `NODE_ENV` on Render; Bhargavi opens PRs and runs production migrations.
@@ -132,4 +133,4 @@ Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhoo
 - 2026-11-08 Lane: memo/consignment B2B — empty in this hackathon (404 repos checked).
 
 ## Links
-Repo: https://github.com/Bhargavi2212/memo-to-cash · Live: _(add after P0 — https://memo-to-cash-web.onrender.com)_ · Video: _(P5)_ · Devpost: _(P5)_
+Repo: https://github.com/Bhargavi2212/memo-to-cash · Live: https://memo-to-cash-web.onrender.com (api: https://memo-to-cash-api.onrender.com) · Video: _(P5)_ · Devpost: _(P5)_
