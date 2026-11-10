@@ -83,6 +83,7 @@ memo-to-cash/
 │   └── run_eval.py                 P4 `python -m eval.run_eval`
 └── tests/
     ├── conftest.py · dbguard.py   test DB wiring (P1 D10–D12: `db` fixture, guard, schema reset)
+    ├── paypal_fake.py             in-memory PayPal Invoicing (MockTransport) for mirror/demo tests
     ├── unit/         test_config.py · test_llm.py · test_session.py · test_dbguard.py · test_money.py · test_dates.py · test_paypal_client.py · test_invoices.py · test_split.py (Hypothesis) · test_validators.py
     ├── integration/  test_health.py · test_db_smoke.py · test_schema.py · test_importer.py · test_mirror.py · test_import_api.py · test_statement_api.py · test_payments_flow.py · test_webhooks.py · test_demo.py · test_scoping.py
     └── fixtures/paypal/*.json      recorded sandbox responses (no network in tests)
