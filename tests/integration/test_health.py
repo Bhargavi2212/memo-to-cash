@@ -110,3 +110,14 @@ def test_docs_live_under_api(client):
     assert client.get("/api/openapi.json").status_code == 200
     assert client.get("/api/docs").status_code == 200
     assert client.get("/openapi.json").status_code == 404
+
+
+def test_live_never_touches_the_database(client, monkeypatch):
+    """Render's health check must let Neon sleep (P2 D24)."""
+
+    def boom():
+        raise AssertionError("health/live must not query the database")
+
+    monkeypatch.setattr(health, "check_db", boom)
+    r = client.get("/api/health/live")
+    assert r.status_code == 200 and r.json() == {"ok": True}

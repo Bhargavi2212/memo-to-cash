@@ -1,5 +1,6 @@
 """Health checks.
 
+GET /api/health/live  public, no DB — Render's health check (lets Neon sleep).
 GET /api/health       public. Never 500s: a failed DB check reports db:false.
 GET /api/health/deep  admin only. DB + PayPal OAuth + LLM ping in parallel, each with
                       its own time limit. Never returns secrets or token values.
@@ -59,6 +60,14 @@ async def _run(fn, timeout: float, failed: Any) -> Any:
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+
+
+@router.get("/health/live")
+async def health_live() -> dict[str, bool]:
+    """Render's health check (P2 D24). No database call, so Neon's free-plan compute can
+    scale to zero when nobody uses the app (a DB check every few seconds kept it awake
+    24/7 and would exhaust the 100 CU-h/month allowance)."""
+    return {"ok": True}
 
 
 @router.get("/health")

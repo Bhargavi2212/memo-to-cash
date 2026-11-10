@@ -34,7 +34,7 @@ services:
     autoDeployTrigger: commit # checksPass never fired on Render (P1 B11); main only gets green-CI merges
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --proxy-headers
-    healthCheckPath: /api/health
+    healthCheckPath: /api/health/live # no DB call, so Neon can scale to zero (P2 D24)
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
