@@ -13,8 +13,10 @@ envVarGroups:
         value: https://api-m.sandbox.paypal.com
       - key: DEMO_MODE
         value: "true"
-      - key: LLM_MODEL
-        value: Llama-4-Maverick-17B-128E-Instruct-FP8
+      - key: LLM_MODEL # Meta Model API; never a -contributor model
+        value: muse-ember-1.0
+      - key: LLM_REASONING_EFFORT
+        value: low
       - key: APP_BASE_URL
         value: https://memo-to-cash-web.onrender.com
       - key: API_PUBLIC_URL

@@ -1,6 +1,6 @@
-"""Check the Llama key + model from your machine (reads local .env).
+"""Check the LLM key + model (Meta Model API) from your machine (reads local .env).
 
-    python -m scripts.llama_smoke
+    python -m scripts.llm_smoke
 
 Prints ok / model / latency only. On a 404 it lists the model ids the key can use.
 Never prints the key.

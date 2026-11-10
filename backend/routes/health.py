@@ -1,7 +1,7 @@
 """Health checks.
 
 GET /api/health       public. Never 500s: a failed DB check reports db:false.
-GET /api/health/deep  admin only. DB + PayPal OAuth + Llama ping in parallel, each with
+GET /api/health/deep  admin only. DB + PayPal OAuth + LLM ping in parallel, each with
                       its own time limit. Never returns secrets or token values.
 """
 

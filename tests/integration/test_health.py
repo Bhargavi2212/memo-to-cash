@@ -1,4 +1,4 @@
-"""Health endpoints. DB, PayPal and Llama are mocked; no TEST_DATABASE_URL needed (P0)."""
+"""Health endpoints. DB, PayPal and the LLM are mocked; no TEST_DATABASE_URL needed (P0)."""
 
 import time
 

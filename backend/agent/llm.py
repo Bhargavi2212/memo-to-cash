@@ -1,18 +1,21 @@
-"""Meta Llama API through the OpenAI client (OpenAI-compatible endpoint).
+"""Meta Model API (Muse models) through the OpenAI client (OpenAI-compatible endpoint).
 
 P0: client + ping. P4 adds the agent jobs on top. Never logs or returns the API key.
+Muse models reason before answering: a reply cut off by the token limit
+(finish_reason="length") or with no text is a failure, never a partial answer.
 """
 
 import time
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import openai
 from openai import OpenAI
 
 from backend.core.config import settings
 
-LLAMA_BASE_URL = "https://api.llama.com/compat/v1/"
+LLM_BASE_URL = "https://api.meta.ai/v1"
 TIMEOUT_S = 8.0
+PING_MAX_TOKENS = 400  # room for the model's reasoning + a one-word answer
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -30,24 +33,35 @@ def get_client(*, retry: bool = True) -> OpenAI:
     if settings.llm_api_key is None:
         raise LLMNotConfiguredError("LLM_API_KEY is not set")
     return OpenAI(
-        base_url=LLAMA_BASE_URL,
+        base_url=LLM_BASE_URL,
         api_key=settings.llm_api_key.get_secret_value(),
         timeout=TIMEOUT_S,
         max_retries=1 if retry else 0,
     )
 
 
+def call_kwargs() -> dict[str, Any]:
+    """Model settings every call uses (P4 jobs add messages, tools, response_format)."""
+    return {
+        "model": settings.llm_model,
+        "reasoning_effort": settings.llm_reasoning_effort,
+        "temperature": 0.1,
+    }
+
+
 def ping(*, retry: bool = False) -> PingResult:
-    """One tiny completion to prove the key + model work. Never raises."""
+    """One tiny completion to prove the key + model answer. Never raises."""
     model = settings.llm_model
     start = time.perf_counter()
     try:
         resp = get_client(retry=retry).chat.completions.create(
-            model=model,
+            **call_kwargs(),
             messages=[{"role": "user", "content": "Reply with the word OK"}],
-            max_tokens=5,
-            temperature=0,
+            max_tokens=PING_MAX_TOKENS,
         )
+        choice = resp.choices[0]
+        if choice.finish_reason == "length" or not (choice.message.content or "").strip():
+            return PingResult(False, model, _ms(start), "no answer (cut off by token limit)")
         return PingResult(True, resp.model or model, _ms(start))
     except LLMNotConfiguredError as e:
         return PingResult(False, model, _ms(start), str(e))

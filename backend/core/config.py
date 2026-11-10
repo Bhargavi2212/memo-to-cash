@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     paypal_business_email: str | None = None
     paypal_webhook_id: str | None = None
     llm_api_key: SecretStr | None = None
-    llm_model: str = "Llama-4-Maverick-17B-128E-Instruct-FP8"
+    llm_model: str = "muse-ember-1.0"  # Meta Model API; backup muse-spark-1.3 (P4 eval decides)
+    llm_reasoning_effort: str = "low"
     admin_token: SecretStr | None = None
     demo_mode: bool = False
     demo_cookie_secret: SecretStr | None = None
@@ -62,6 +63,13 @@ class Settings(BaseSettings):
     def _sandbox_only(cls, v: str) -> str:
         if v != SANDBOX_BASE_URL:
             raise ValueError(f"PAYPAL_BASE_URL must be the sandbox ({SANDBOX_BASE_URL})")
+        return v
+
+    @field_validator("llm_model")
+    @classmethod
+    def _no_contributor_model(cls, v: str) -> str:
+        if "-contributor" in v:
+            raise ValueError("LLM_MODEL must not be a -contributor model (CLAUDE.md §5)")
         return v
 
     @field_validator("app_env")

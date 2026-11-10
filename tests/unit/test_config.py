@@ -106,3 +106,17 @@ def test_sqlalchemy_url(given, expected):
 def test_sqlalchemy_url_rejects_other_schemes():
     with pytest.raises(ValueError):
         sqlalchemy_url("mysql://u:p@h/db")
+
+
+@pytest.mark.parametrize("model", ["muse-spark-1.3-contributor", "muse-spark-1.2-contributor"])
+def test_contributor_model_refused(env, model):
+    env.setenv("LLM_MODEL", model)
+    with pytest.raises(ValidationError, match="contributor"):
+        load_settings(_env_file=None)
+
+
+def test_llm_model_and_reasoning_effort_are_settings(env):
+    env.setenv("LLM_MODEL", "muse-spark-1.3")
+    env.setenv("LLM_REASONING_EFFORT", "medium")
+    s = load_settings(_env_file=None)
+    assert (s.llm_model, s.llm_reasoning_effort) == ("muse-spark-1.3", "medium")
