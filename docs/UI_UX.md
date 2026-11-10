@@ -60,6 +60,8 @@
 ```
 - Split preview appears under the amount. Default (all invoices): "INV-1038 $3,500 · INV-1042 $3,500 · INV-1051 $1,420". Demo story uses "Pay a different amount" = $5,000 → "INV-1038 $3,500 · INV-1042 $1,500".
 - "Pay a different amount" opens a number field; preview updates live (debounced call to `/preview`).
+- Demo mode only: "Pay a different amount" is **prefilled with $5,000** with the line "Demo: one payment split across two invoices — or pay the full $8,420" (P2 D20/R10), and a box next to the PayPal buttons shows the sandbox buyer login (email / password, "sandbox only") plus the guest-card fallback (P2 R9).
+- PayPal's own checkout window lists the split as items (INV-1038 $3,500 · INV-1042 $1,500) — P2 D9.
 - Answers show record chips (`Return R-311 · 38 days ago`) that scroll to the line.
 - "Something wrong? Tell Demo Diamond Co." → free text → message (becomes a proposal).
 - States: loading skeleton; all paid ("Nothing owed — thank you"); invalid link; PayPal error banner ("Payment didn't go through. You weren't charged.").

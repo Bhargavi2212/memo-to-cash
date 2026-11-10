@@ -37,9 +37,9 @@ memo-to-cash/
 │   ├── settings.json               ✅ blocks reading .env, force-push
 │   └── commands/                   ✅ phase.md · verify.md · sandbox-smoke.md · review-money.md
 ├── docs/                           ✅ PRD · TRD · UI_UX · APP_FLOW · BACKEND_SCHEMA · IMPLEMENTATION_PLAN · RESEARCH · APIMATIC (sponsor proof log) · _archive/ · img/ (screenshots, P1+)
-│   └── phases/                     ✅ P0.md · P0-plan.md (build plan + gaps) · P1.md (spec v2, D1–D25) — one spec per phase, written before it starts
+│   └── phases/                     ✅ P0.md · P0-plan.md (build plan + gaps) · P1.md (spec v2, D1–D25) · P1-plan.md · P2.md (spec v2, D1–D24 + R1–R16) — one spec per phase, written before it starts
 ├── scripts/                        __init__.py (P0)
-│   ├── sandbox/                    ✅ statement_test.ps1 · statement_test_v2.ps1 (manual PayPal experiments) · __init__.py + p1_open_checks.py (P1, `python -m scripts.sandbox.p1_open_checks`)
+│   ├── sandbox/                    ✅ statement_test.ps1 · statement_test_v2.ps1 (manual PayPal experiments) · __init__.py + p1_open_checks.py (P1, `python -m scripts.sandbox.p1_open_checks`) · p2_smoke.py (P2, order → approve in browser → capture → record)
 │   ├── llm_smoke.py                P0 LLM key + model check (prints ok/model/ms only)
 │   └── sandbox_smoke.py            P5 end-to-end run against the real sandbox
 │
@@ -50,7 +50,7 @@ memo-to-cash/
 ├── .github/workflows/ci.yml        P0 ruff · pytest · tsc · eslint
 │
 ├── app/                            Next.js pages
-│   ├── page.tsx                    P0 shell → P5 judge path ("Start the demo")
+│   ├── page.tsx                    P0 shell → P2 "Start the demo"/"Start again" wired → P5 polish
 │   ├── api/[...path]/route.ts      P0 runtime proxy: /api/* → api service (private network)
 │   ├── layout.tsx · globals.css    P0
 │   ├── s/[token]/page.tsx          P2 buyer statement
@@ -63,7 +63,8 @@ memo-to-cash/
 ├── components/                     P2–P3 PayPanel · AskBox · MemoGroup · InvoiceList · StatusChip · Receipt · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
 ├── lib/
 │   ├── api.ts                      P2 typed API client
-│   └── money.ts                    P2 the only money formatter
+│   ├── money.ts                    P2 the only money formatter
+│   └── paypal.ts                   P2 tiny PayPal JS SDK loader (URL from /api/config, no extra dependency)
 │
 ├── backend/
 │   ├── main.py                     P0 FastAPI app (uvicorn) — Render api service
@@ -84,7 +85,7 @@ memo-to-cash/
 └── tests/
     ├── conftest.py · dbguard.py   test DB wiring (P1 D10–D12: `db` fixture, guard, schema reset)
     ├── paypal_fake.py             in-memory PayPal Invoicing (MockTransport) for mirror/demo tests
-    ├── unit/         test_config.py · test_llm.py · test_session.py · test_dbguard.py · test_money.py · test_dates.py · test_paypal_client.py · test_invoices.py · test_split.py (Hypothesis) · test_validators.py
+    ├── unit/         test_config.py · test_llm.py · test_session.py · test_dbguard.py · test_money.py · test_dates.py · test_paypal_client.py · test_invoices.py · test_orders.py · test_split.py (Hypothesis) · test_validators.py
     ├── integration/  test_health.py · test_db_smoke.py · test_schema.py · test_importer.py · test_mirror.py · test_import_api.py · test_statement_api.py · test_payments_flow.py · test_webhooks.py · test_demo.py · test_scoping.py
     └── fixtures/paypal/*.json      recorded sandbox responses (no network in tests)
 ```
@@ -115,6 +116,11 @@ memo-to-cash/
 Open checks (TRD §9): ~~1 PUT on PARTIALLY_PAID~~ ✅ P1 · 2 Venmo in sandbox · 3 webhook to Render · 4 LLM latency on real statements · ~~5~~ ✅ P0 · ~~6 transaction id~~ ✅ P1 · ~~7~~ ✅ P0 · ~~8 past dates~~ ✅ P1 · ~~9 tiny amounts~~ ✅ P1 · ~~10 Request-Id on create~~ ❌ not honoured (search & adopt) · ~~11 duplicate error~~ ✅ `details[].issue`.
 
 ## Decisions log (newest first — add one line per decision)
+- 2026-11-10 **P2 review fixes** (no feature cut — Bhargavi: nothing is cut in P2): BACKEND_SCHEMA §8 order→capture now says GET the order before VOIDED (R1); D5(e) receipt before recording; step 5 split into 5a–5d; smoke script calls the Orders/Invoicing clients directly; own PayPal SDK loader (no `@paypal/react-paypal-js`); spare sandbox buyer with $99,999 if the balance can't be raised.
+- 2026-11-10 **Neon fixed (hotfix `7d63adb`):** Render health check → `/api/health/live` (no DB). Production `main` had been awake 100% (7.8 h of 7.8 h, ~6 CU-h/day → free 100 CU-h gone ~Nov 25–27). After the change it went idle at 11:05 UTC; cold start 0.98 s, warm 0.18 s. **Render does not apply `render.yaml` changes by itself** (health check path and earlier the deploy trigger were set by hand) → every `render.yaml` change needs a Blueprint Manual Sync or a dashboard edit.
+- 2026-11-10 **Neon free-plan risk (P2 D24):** Render's health check hits `/api/health`, which queries the database every few seconds, so production Neon never scales to zero → 100 CU-h/month could run out during judging and suspend the live demo. Fix: health check path `/api/health/live` (no DB), production max 0.25 CU, adaptive worker polling in P3. Also D23: a payment made directly on PayPal's invoice page before P3 → our record fails safely (FAILED + mismatch), reconciled by P3 backfill.
+- 2026-11-10 **P2 spec v2** after an independent review (R1–R16 in P2.md): never VOID a payment PayPal captured (GET order first); capture Request-Id gets an attempt suffix after a decline; payment_source mapping (paylater → paypal, card → application_context); P2 has its own retry (`/payments/{id}/refresh`, re-POST `/capture`); migration 0003 adds `payments.created_at/updated_at/capture_attempts`; `next build` in CI; token fetched before the capture lock + 10 s total cap; receipt returns before recording (BackgroundTask + polling); demo prefills $5,000; spare sandbox buyer + guest-card fallback; Pay Monthly (not Pay in 4) at $5,000; ~10 h realistic.
+- 2026-11-10 **P2 spec** (`docs/phases/P2.md` D1–D22): statement from our ledger only (no PayPal on page load); order = payment CREATED + planned_split, then PayPal order with per-invoice `items`, `NO_SHIPPING`, `custom_id`/`invoice_id` from payment uid; capture under the buyer lock (10 s, no retries), issue-based errors (ORDER_ALREADY_CAPTURED → finish, INSTRUMENT_DECLINED → 402 + SDK restart), capture PENDING → `CAPTURE_PENDING`; record allocations concurrently after commit + GET for PayPal due; `resolve_recording` built now; `/api/config` serves the PayPal client id at runtime (no NEXT_PUBLIC); token redacted from access logs + browser-default referrer policy (R12 dropped no-referrer); landing start wired in P2; smoke script before the UI; demo tip $5,000 + P3 must turn a deduction on a paid INV-1051 into a credit; sandbox buyer balance raised; APIMatic claim at end of P2.
 - 2026-11-09 Render `autoDeployTrigger: checksPass` never fired after green CI → switched to `commit` (P0 B4 fallback). The guard is now ours: merge to `main` only after CI is green.
 - 2026-11-09 **P1 open checks (real sandbox):** 1 PUT on part-paid ✅ · 6 record returns `payment_id` ✅ · 8 past dates kept ✅ (no D22 fallback) · 9 $0.05 ✅ · **10 Request-Id NOT honoured on create** → D4 search & adopt is required · 11 duplicate = 422 `UNPROCESSABLE_ENTITY` + `details[].issue=DUPLICATE_INVOICE_NUMBER` · R6 create returns full invoice + send returns payer link → 2 calls per invoice (GET dropped) · R12 reused send key didn't replay a failure → one send key, no attempt suffix. Field paths: `invoicer.business_name`, `billing_info.business_name`.
 - 2026-11-09 **P1 spec v2** after an independent review (supersedes the D1–D19 lines below; v1 in `docs/_archive/P1-draft1.md`): D1–D25 in `docs/phases/P1.md §2`. Key changes: `buyers.demo_ready` + cookie only on success; every start = new session; search by number only on retry/duplicate; store id on create, send only if DRAFT; 8 s per call / 20 s demo deadline; 503 `PAYPAL_UNAVAILABLE` vs 502 `PAYPAL_REJECTED`; limits 15/h per IP + 60/h global (UTC, count on success); test DB = Neon `test` direct URL, guarded, schema reset, `db` marker + `REQUIRE_TEST_DB`; CSV contract + validation list; `invoice_lines` uniques; `PAYPAL_PAST_DATES_OK` fallback; open checks 10–11 added; import endpoint, `put_adjustment`, `remind`, `sample_export.csv` moved to P3.

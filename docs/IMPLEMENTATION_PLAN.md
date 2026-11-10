@@ -29,11 +29,13 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 **Done when:** every box in `docs/phases/P1.md §6` is ticked.
 
 ## Phase P2 — Statement + one-payment-many-invoices (Tue)
+**Spec: `docs/phases/P2.md` (source of truth, decisions D1–D24, review R1–R16, done-when).** Summary:
 - [ ] `core/split.py` pure function + Hypothesis property tests
 - [ ] Routes: `GET /statement`, `POST /preview`, `/order`, `/capture`
 - [ ] `services/payments.py`: capture → payment + allocations (one transaction) → record on each PayPal invoice → retry state
 - [ ] Statement page UI (4.1) + receipt (4.2); PayPal JS SDK buttons (PayPal, Pay Later, Venmo)
-- [ ] **Open check 2:** Venmo button in sandbox
+- [ ] **Open checks 2, 12, 13:** Venmo button in sandbox; capture response + NO_SHIPPING; split shown as items in PayPal's window (`scripts/sandbox/p2_smoke.py`, run before the UI)
+- [ ] Landing "Start the demo" / "Start again" wired (P5 polishes)
 **Tests:** split properties; preview defaults (BACKEND_SCHEMA §8); capture idempotency (second `/capture` on a CAPTURED payment → same receipt, 200, nothing new written); `test_concurrent_captures_serialized` (two captures for one buyer at once → second waits, never over-allocates); approved-but-closed-tab order captured by webhook/sweep; **409 STATEMENT_CHANGED** when balance changed between order and capture; `ORDER_ALREADY_CAPTURED` → finish capture; partial record failure → retry recorded once; stuck RECORDING resolved by finding `[MTC:<uid>]`.
 **Done when:** sandbox: pay $5,000 across 2 invoices → PayPal invoices show correct due amounts; receipt correct.
 
@@ -110,4 +112,5 @@ Supplier "Demo Diamond Co." · Buyer "Northside Jewelers" (email = `SANDBOX_BUYE
 | INV-1051 | M-212 | S-120 | $1,420 | D-5 | D+25 |
 Totals: 12 lines = 5 kept, 5 returned, 2 out · owed **$8,420** · oldest unpaid 48 days.
 Seeded message + pending proposal: "There's a small scratch on the S-120 solitaire, please take $20 off." → ADJUSTMENT −$20 on **INV-1051** (evidence: S-120 kept on INV-1051, price $1,420, due $1,420). Chosen so it stays valid after the judge pays $5,000 (which clears INV-1038 and part of INV-1042; INV-1051 stays unpaid, so no edit of a paid or part-paid invoice is needed).
+**If the judge pays the full $8,420** (default selection), INV-1051 is paid and the seeded −$20 can't apply as a deduction: P2 prefills $5,000 in demo mode and **P3 approval turns it into "record a $20 credit"** instead of an error (P2 D20).
 Demo copies: `paypal_invoice_number` = `INV-1038-<6 random chars>`; memo/invoice numbers shown to people stay `M-201` / `INV-1038`.

@@ -90,12 +90,15 @@ CREATE TABLE payments (
   paypal_order_id TEXT UNIQUE,
   paypal_capture_id TEXT UNIQUE,
   amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
-  status TEXT NOT NULL,                           -- STATEMENT: CREATED → CAPTURED | FAILED | VOIDED ; OFF_PAYPAL: RECORDED ; PAYPAL_INVOICE_PAGE: CAPTURED ; any captured → REFUNDED (shown only)
+  status TEXT NOT NULL,                           -- STATEMENT: CREATED → CAPTURED | CAPTURE_PENDING | FAILED | VOIDED ; OFF_PAYPAL: RECORDED ; PAYPAL_INVOICE_PAGE: CAPTURED ; any captured → REFUNDED (shown only)
   planned_split JSONB,                            -- STATEMENT: [{invoice_id, amount_cents}] computed at order time; re-checked at capture
   method TEXT,                                    -- for OFF_PAYPAL: CHECK | WIRE_TRANSFER | OTHER
   reference TEXT,                                 -- e.g. cheque number
   received_at TIMESTAMPTZ,
-  unapplied_cents BIGINT NOT NULL DEFAULT 0 CHECK (unapplied_cents >= 0)  -- captured money that fit no invoice (credit)
+  unapplied_cents BIGINT NOT NULL DEFAULT 0 CHECK (unapplied_cents >= 0), -- captured money that fit no invoice (credit)
+  capture_attempts INT NOT NULL DEFAULT 0,       -- bumped only after a decline → capture Request-Id suffix (P2 R2)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- migration 0003 (P2 R5): notices + sweep age
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()  -- set on every status change
 );
 
 CREATE TABLE allocations (
@@ -198,11 +201,13 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | POST | `/supplier/sync/{invoice_id}` | admin | → refreshed invoice from PayPal |
 | POST | `/paypal/webhook` | paypal | PayPal event → 200 always after storing; processes idempotently |
 | GET | `/statement/{token}/payments/{id}` | public | → `Receipt` (for the receipt page) |
+| POST | `/statement/{token}/payments/{id}/refresh` | public | → re-runs `resolve_recording` for that payment's RECORDING/FAILED allocations (P2 R4) → `Receipt` |
+| GET | `/config` | public | → `{paypal_client_id, demo_mode}` — loads the PayPal JS SDK at runtime (P2 D12) |
 | GET | `/supplier/buyers/{id}` | admin/demo | → buyer, memos, invoices, messages, proposals, payments, statement link |
 | POST | `/supplier/payments/record` | admin/demo | `{buyer_id, method: CHECK|WIRE_TRANSFER|OTHER, reference, amount_cents, invoice_ids?}` → payment + allocations |
 | POST | `/demo/start` | public (DEMO_MODE, ≤ 15 per IP per hour, ≤ 60 per hour overall) | → creates a fresh demo buyer from the seed (invoice numbers suffixed `-<6 chars>`), mirrors to PayPal, sets demo cookie → `{statement_token, buyer_id, ms}` |
 
-Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknown token, 429 `RATE_LIMITED` / `DEMO_HOURLY_LIMIT`, 503 `NOT_CONFIGURED` (lists missing setting names, never values) / `PAYPAL_UNAVAILABLE` (transient: 5xx/429/timeout after retries, or the 20 s demo deadline), 502 `PAYPAL_REJECTED` (deterministic PayPal 4xx during demo start; debug_id logged), 409 only for `STATEMENT_CHANGED` (an already-captured payment returns its existing receipt with 200), 502 PayPal failure (state saved, retry shown).
+Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknown token, 429 `RATE_LIMITED` / `DEMO_HOURLY_LIMIT`, 503 `NOT_CONFIGURED` (lists missing setting names, never values) / `PAYPAL_UNAVAILABLE` (transient: 5xx/429/timeout after retries, or the 20 s demo deadline), 502 `PAYPAL_REJECTED` (deterministic PayPal 4xx during demo start; debug_id logged), 409 `STATEMENT_CHANGED` / `PAYMENT_FAILED` / `ORDER_NOT_APPROVED` (an already-captured payment returns its existing receipt with 200), 402 `PAYMENT_DECLINED` (SDK restarts checkout), 503 `CAPTURE_UNCONFIRMED`, 422 `AMOUNT_NOT_POSITIVE` / `AMOUNT_EXCEEDS_SELECTED` / `NOTHING_SELECTED` / `INVOICE_NOT_OPEN`, 502 PayPal failure (state saved, retry shown). Full P2 list: `docs/phases/P2.md` D13.
 
 ## 3. Response shapes
 ```jsonc
@@ -222,13 +227,15 @@ Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknow
                  "received_at":"D-2","applied":[{"invoice_no":"INV-1038","amount_cents":200000}] }],
   "credit_cents": 0,                               // Σ unapplied_cents of this buyer's payments (shown as "Credit")
   "notices": [{"kind":"PAYMENT_VOIDED","payment_id":21,"at":"D-0"}],   // kinds: PAYMENT_VOIDED | PAYMENT_CREDITED | RECORDING_PENDING
-  "pending_proposals": 1 }
+  "pending_proposals": 1,
+  "demo_login": {"email": "<SANDBOX_BUYER_EMAIL>", "password": "<sandbox>"} }   // only in DEMO_MODE for demo buyers (P2 D2); invoices[].paypal_url = payer_view_url
 
 // Receipt
 { "payment_id": 17, "paypal_capture_id": "4CN029778W2847743", "amount_cents": 500000,
   "allocations": [{"invoice_no":"INV-1038","amount_cents":350000,"recorded":true},
                   {"invoice_no":"INV-1042","amount_cents":150000,"recorded":true}],
   "new_owed_cents": 342000 }
+// P2 D11 adds: status, received_at, credit_cents, resplit, and per allocation due_after_cents + paypal_url
 ```
 
 ## 4. PayPal invoice body (create)
@@ -314,9 +321,9 @@ Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATIO
 
 **Split leftovers:** no minimum allocation. Any positive cent amount may be allocated, and an allocation can never exceed that invoice's balance. (Open check: PayPal accepts small recorded amounts; if not, reject amounts that would leave an allocation under PayPal's minimum and suggest the nearest valid amount.)
 
-**Order → capture:** at `/order` store `planned_split`. At `/capture`, before capturing, recompute the split with current balances. Same result → capture. Different but the amount still fits the selected invoices → capture and use the new split (receipt says so). Amount no longer fits (e.g. paid meanwhile) → don't call capture (PayPal has no void for an approved CAPTURE order; it simply expires), set our payment `VOIDED`, return 409 `STATEMENT_CHANGED` ("Your statement changed — please review").
+**Order → capture:** at `/order` store `planned_split`. At `/capture`, before capturing, recompute the split with current balances. Same result → capture. Different but the amount still fits the selected invoices → capture and use the new split (receipt says so). Amount no longer fits (e.g. paid meanwhile) → **first GET the order** (P2 R1): if PayPal already shows it `COMPLETED` (we captured earlier but never saw the answer), run `finish_capture` and keep whatever no longer fits as `unapplied_cents` credit (invariant 9). Only an order PayPal has **not** captured → don't call capture (PayPal has no void for an approved CAPTURE order; it simply expires), set our payment `VOIDED`, return 409 `STATEMENT_CHANGED` ("Your statement changed — please review"). **A payment with money at PayPal is never marked VOIDED.**
 
-**PayPal-Request-Id keys:** built from `APP_ENV` (e.g. `dev`, `prod`) + the row's **`uid`** (UUID4 stored on the row, never the serial id), so keys never collide across databases, resets or environments sharing one sandbox: invoice create `<env>-inv-<invoice uid>` · send `<env>-send-<invoice uid>` · order `<env>-ord-<payment uid>` · capture `<env>-cap-<payment uid>` · record payment `<env>-alloc-<allocation uid>` · adjustment PUT `<env>-adj-<proposal uid>` · remind `<env>-rem-<invoice uid>-<YYYYMMDD>-<n>`.
+**PayPal-Request-Id keys:** built from `APP_ENV` (e.g. `dev`, `prod`) + the row's **`uid`** (UUID4 stored on the row, never the serial id), so keys never collide across databases, resets or environments sharing one sandbox: invoice create `<env>-inv-<invoice uid>` · send `<env>-send-<invoice uid>` · order `<env>-ord-<payment uid>` · capture `<env>-cap-<payment uid>` (after a decline `<env>-cap-<payment uid>-<n>`, P2 R2) · record payment `<env>-alloc-<allocation uid>` · adjustment PUT `<env>-adj-<proposal uid>` · remind `<env>-rem-<invoice uid>-<YYYYMMDD>-<n>`.
 
 **PayPal invoice numbers:** in sandbox **always** `paypal_invoice_number = <erp_invoice_no>-<6 random chars>` (demo or not), so two databases seeding the same sandbox never hit `DUPLICATE_INVOICE_NUMBER`. People always see `erp_invoice_no`.
 
@@ -333,7 +340,7 @@ Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATIO
 **Reminders per day:** counted in America/New_York.
 
 **Payment state machine (all sources)**
-- STATEMENT: CREATED → CAPTURED · CREATED → FAILED · CREATED → VOIDED (our status only: statement changed or order expired; no PayPal call)
+- STATEMENT: CREATED → CAPTURED · CREATED → CAPTURE_PENDING (PayPal capture status PENDING; no allocations until `PAYMENT.CAPTURE.COMPLETED`, P2 D6) → CAPTURED · CREATED → FAILED · CREATED → VOIDED (our status only: statement changed or order expired; no PayPal call)
 - OFF_PAYPAL: RECORDED
 - PAYPAL_INVOICE_PAGE: CAPTURED (created by webhook backfill)
 - any CAPTURED/RECORDED → REFUNDED (shown, not automated in v1)
