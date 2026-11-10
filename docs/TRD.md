@@ -114,16 +114,16 @@ Refund/reversal handling of statement payments (shown, not automated), our own e
 - Eval: `python -m eval.run_eval`.
 
 ## 9. Open checks (do in P1–P3)
-1. PUT adjustment on a PARTIALLY_PAID invoice.
+1. ✅ (P1) PUT adjustment on a PARTIALLY_PAID invoice works (strip rule; `?send_to_recipient=false&send_to_invoicer=false`; PUT answers with a link → GET for the new due).
 2. Venmo button renders in sandbox; whether a sandbox Venmo payment can complete.
 3. Webhook delivery to the Render URL; signature verification.
 4. LLM tool-calling latency acceptable for the ask box (< 8 s) on real statements (P4 eval). P0: 1.2–1.8 s for tool call + answer on a tiny case.
 5. ✅ (P0) LLM key + model id: Meta Model API key works at `api.meta.ai/v1`; `muse-ember-1.0` available. (The old Llama API `api.llama.com` rejects Model API keys.) Deep health on Render re-confirms after deploy.
-6. Record-payment response returns a PayPal transaction id (dedupe still works via the `[MTC:<uid>]` note token if not).
+6. ✅ (P1) Record-payment returns `{payment_id}` (the transaction id) — store it in `allocations.paypal_transaction_id`; the `[MTC:<uid>]` note is also visible in `payments.transactions[].note`.
 7. ✅ (P0) Tool calling and `response_format: json_schema` together in one call — works on `muse-ember-1.0` and `muse-spark-1.3`.
-8. PayPal accepts an `invoice_date` in the past and a `DUE_ON_DATE_SPECIFIED` due date in the past (needed for the overdue demo invoice). Fallback: create with today's date and keep our dates as the truth (note on supplier screen).
-9. PayPal accepts recorded payments of a few cents (no minimum).
-10. PayPal honours `PayPal-Request-Id` on invoice create (same id twice → same invoice). Fallback: duplicate-number search & adopt (P1 D4).
-11. Error name returned for a duplicate `invoice_number` (expect `DUPLICATE_INVOICE_NUMBER`).
+8. ✅ (P1) Past `invoice_date` (D-48) and past `DUE_ON_DATE_SPECIFIED` due date (D-18) are kept as sent; status UNPAID. `PAYPAL_PAST_DATES_OK` stays true (D22 fallback not needed).
+9. ✅ (P1) A $0.05 recorded payment is accepted (no minimum).
+10. ❌ (P1) PayPal does **not** honour `PayPal-Request-Id` on invoice create: a repeat fails as a duplicate number. Resume = search by `invoice_number` and adopt (P1 D4) — required, not optional.
+11. ✅ (P1) Duplicate `invoice_number` → HTTP 422, `name` = `UNPROCESSABLE_ENTITY`, **`details[].issue` = `DUPLICATE_INVOICE_NUMBER`** — match on the issue, never the name.
 
-Checks 1, 6, 8, 9, 10, 11 run in P1 step 7 (`python -m scripts.sandbox.p1_open_checks`).
+Checks 1, 6, 8, 9, 10, 11 answered on 2026-11-09 by `python -m scripts.sandbox.p1_open_checks` (re-runnable; also R6: create with `Prefer: return=representation` returns the full invoice and send returns the payer link → 2 calls per invoice; R12: a reused send Request-Id did not replay a failure).

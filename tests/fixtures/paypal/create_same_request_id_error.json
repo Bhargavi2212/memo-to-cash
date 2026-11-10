@@ -1,0 +1,14 @@
+{
+  "debug_id": "REDACTED",
+  "details": [
+    {
+      "description": "Invoice number is duplicate.",
+      "field": "/detail/invoice_number",
+      "issue": "DUPLICATE_INVOICE_NUMBER",
+      "location": "body",
+      "value": "INV-9634-c0dyzq"
+    }
+  ],
+  "message": "The requested action could not be performed, semantically incorrect, or failed business validation.",
+  "name": "UNPROCESSABLE_ENTITY"
+}

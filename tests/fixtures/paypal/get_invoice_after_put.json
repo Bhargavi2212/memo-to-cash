@@ -1,0 +1,169 @@
+{
+  "amount": {
+    "breakdown": {
+      "discount": {
+        "invoice_discount": {
+          "amount": {
+            "currency_code": "USD",
+            "value": "0.00"
+          }
+        },
+        "item_discount": {
+          "currency_code": "USD",
+          "value": "0.00"
+        }
+      },
+      "item_total": {
+        "currency_code": "USD",
+        "value": "3480.00"
+      },
+      "tax_total": {
+        "currency_code": "USD",
+        "value": "0.00"
+      }
+    },
+    "currency_code": "USD",
+    "value": "3480.00"
+  },
+  "configuration": {
+    "allow_only_pay_by_bank": false,
+    "allow_tip": false,
+    "allow_vba_payments": false,
+    "partial_payment": {
+      "allow_partial_payment": true,
+      "minimum_amount_due": {
+        "currency_code": "USD",
+        "value": "1.00"
+      }
+    },
+    "save_item_for_future": true,
+    "tax_calculated_after_discount": false,
+    "tax_inclusive": false,
+    "template_id": "TEMP-6SA13879W6583252W"
+  },
+  "detail": {
+    "archived": false,
+    "category_code": "SHIPPABLE",
+    "currency_code": "USD",
+    "group_draft": false,
+    "invoice_date": "2026-09-22",
+    "invoice_number": "INV-9898-s4dond",
+    "memo": "Kept from memo M-201 \u00b7 ERP INV-9001",
+    "metadata": {
+      "caller_type": "API_V2_INVOICE",
+      "create_time": "2026-11-10T03:28:18Z",
+      "created_by_flow": "REGULAR_SINGLE",
+      "invoicer_view_url": "https://www.sandbox.paypal.com/invoice/details/INV2-F9FC-KSDA-XDDQ-MGKV",
+      "last_update_time": "2026-11-10T03:28:28Z",
+      "recipient_view_url": "https://www.sandbox.paypal.com/invoice/p/REDACTED",
+      "spam_info": {}
+    },
+    "note": "See everything you owe and pay several invoices at once: http://localhost:3000/s/open-checks-token",
+    "payment_term": {
+      "due_date": "2026-10-22",
+      "term_type": "DUE_ON_DATE_SPECIFIED"
+    },
+    "reference": "M-201",
+    "viewed_by_recipient": false
+  },
+  "due_amount": {
+    "currency_code": "USD",
+    "value": "3429.95"
+  },
+  "id": "INV2-F9FC-KSDA-XDDQ-MGKV",
+  "invoicer": {
+    "business_name": "Demo Diamond Co.",
+    "email_address": "supplier@example.com"
+  },
+  "items": [
+    {
+      "description": "SKU S-101 \u00b7 memo M-201",
+      "id": "ITEM-76R395932G8543935",
+      "name": "S-101 Round 1.01ct (memo M-201)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "2350.00"
+      }
+    },
+    {
+      "description": "SKU S-104 \u00b7 memo M-201",
+      "id": "ITEM-85868847EJ147202R",
+      "name": "S-104 Stud pair (memo M-201)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "1150.00"
+      }
+    },
+    {
+      "id": "ITEM-4WF72984W17213734",
+      "name": "Adjustment: scratch",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "-20.00"
+      }
+    }
+  ],
+  "links": [
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-F9FC-KSDA-XDDQ-MGKV",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-F9FC-KSDA-XDDQ-MGKV/payments",
+      "method": "POST",
+      "rel": "record-payment"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-F9FC-KSDA-XDDQ-MGKV/refunds",
+      "method": "POST",
+      "rel": "record-refund"
+    }
+  ],
+  "payments": {
+    "paid_amount": {
+      "currency_code": "USD",
+      "value": "50.05"
+    },
+    "transactions": [
+      {
+        "amount": {
+          "currency_code": "USD",
+          "value": "50.00"
+        },
+        "method": "PAYPAL",
+        "note": "Memo-to-Cash open check [MTC:85baeda1-060d-4bfb-a6f2-9e3b7341afa5]",
+        "payment_date": "2026-11-09",
+        "payment_date_time": "2026-11-09T00:00:00Z",
+        "payment_id": "EXTR-2G974016A54880203",
+        "type": "EXTERNAL"
+      },
+      {
+        "amount": {
+          "currency_code": "USD",
+          "value": "0.05"
+        },
+        "method": "PAYPAL",
+        "note": "tiny [MTC:a23425fd-944e-438d-a4fe-6f81238651a8]",
+        "payment_date": "2026-11-09",
+        "payment_date_time": "2026-11-09T00:00:00Z",
+        "payment_id": "EXTR-0BC499232N3657057",
+        "type": "EXTERNAL"
+      }
+    ]
+  },
+  "primary_recipients": [
+    {
+      "billing_info": {
+        "business_name": "Northside Jewelers",
+        "email_address": "buyer@example.com"
+      }
+    }
+  ],
+  "settings": {},
+  "status": "PARTIALLY_PAID",
+  "unilateral": false
+}

@@ -238,8 +238,8 @@ Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknow
               "payment_term": {"term_type": "DUE_ON_DATE_SPECIFIED", "due_date": "<due_on, YYYY-MM-DD>"},
               "memo": "Kept from memo M-201 · ERP INV-1038",          // private to the merchant
               "note": "See everything you owe and pay several invoices at once: <APP_BASE_URL>/s/<token>" },   // visible to the buyer
-  "invoicer": { "email_address": "<PAYPAL_BUSINESS_EMAIL>", "business_name": "<SUPPLIER_NAME>" },   // field path CONFIRMED via APIMatic in P1 step 6 (D7); bill-to name "Northside Jewelers" in billing_info, path confirmed there too,
-  "primary_recipients": [{ "billing_info": { "email_address": "<buyer email>" } }],
+  "invoicer": { "email_address": "<PAYPAL_BUSINESS_EMAIL>", "business_name": "<SUPPLIER_NAME>" },   // CONFIRMED by the P1 sandbox run (D7)
+  "primary_recipients": [{ "billing_info": { "business_name": "Northside Jewelers", "email_address": "<buyer email>" } }],   // bill-to name, CONFIRMED (D7)
   "items": [{ "name": "S-104 Stud pair (memo M-201)", "description": "SKU S-104 · memo M-201", "quantity": "1",
               "unit_amount": {"currency_code": "USD", "value": "1150.00"} }],
   "configuration": { "partial_payment": { "allow_partial_payment": true,

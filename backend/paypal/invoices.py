@@ -15,11 +15,13 @@ from typing import Any
 from backend.core.config import Settings
 from backend.core.dates import today_ny
 from backend.core.money import fmt_paypal
-from backend.paypal.client import PayPal, request_id
+from backend.paypal.client import PayPal, PayPalError, request_id
 
 BASE = "/v2/invoicing/invoices"
 CURRENCY = "USD"
-DUPLICATE_INVOICE_NUMBER = "DUPLICATE_INVOICE_NUMBER"  # confirmed by open check 11
+# Open check 11 (sandbox): a duplicate number is HTTP 422 name=UNPROCESSABLE_ENTITY with
+# details[].issue == DUPLICATE_INVOICE_NUMBER — match on the issue, never on `name`.
+DUPLICATE_INVOICE_NUMBER = "DUPLICATE_INVOICE_NUMBER"
 RECORD_METHODS = {"PAYPAL", "CHECK", "WIRE_TRANSFER", "BANK_TRANSFER", "CASH", "OTHER"}
 
 
@@ -124,14 +126,33 @@ def build_body(
     }
 
 
+def is_duplicate_number(e: PayPalError) -> bool:
+    return e.status == 422 and any(
+        isinstance(d, dict) and d.get("issue") == DUPLICATE_INVOICE_NUMBER for d in e.details
+    )
+
+
+def payer_url_from_send(body: dict[str, Any]) -> str | None:
+    """Open check R6: send answers with the payer link itself `{rel: payer-view, href}`,
+    so no GET is needed after send (2 PayPal calls per invoice, not 3)."""
+    if body.get("rel") == "payer-view" and body.get("href"):
+        return str(body["href"])
+    for link in body.get("links") or []:
+        if link.get("rel") == "payer-view":
+            return str(link.get("href"))
+    return None
+
+
 def invoice_id_from_href(href: str) -> str:
     """Create returns a link; the id is its last path segment (CLAUDE.md §4)."""
     return href.rstrip("/").rsplit("/", 1)[-1]
 
 
 async def create(pp: PayPal, draft: InvoiceDraft, *, today: date | None = None) -> dict[str, Any]:
-    """POST create. Returns PayPal's body plus `id`. Asks for the full invoice
-    (`Prefer: return=representation`, review R6); falls back to the href link body."""
+    """POST create. Returns the full invoice (`Prefer: return=representation` — confirmed in
+    the sandbox, R6); falls back to the href link body. Open check 10: PayPal does NOT honour
+    a repeated Request-Id here — a repeat fails as a duplicate number, so callers resume with
+    `search_by_number` (P1 D4)."""
     body = await pp.request(
         "POST",
         BASE,

@@ -156,3 +156,69 @@ async def test_record_payment_requires_mtc_token(settings):
             payment_date=D,
             note="no token here",
         )
+
+
+# ---- response handling on REAL redacted sandbox fixtures (step 4, review R7) ----
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from backend.paypal.client import PayPalError  # noqa: E402
+
+FIX = Path(__file__).resolve().parents[1] / "fixtures" / "paypal"
+
+
+def fixture(name: str):
+    return json.loads((FIX / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def test_create_returns_full_invoice_with_id():
+    body = fixture("create_invoice")
+    assert body["id"].startswith("INV2-") and body["status"] == "DRAFT"
+    assert body["due_amount"] == {"currency_code": "USD", "value": "3500.00"}
+    assert body["invoicer"]["business_name"] == "Demo Diamond Co."
+    assert body["primary_recipients"][0]["billing_info"]["business_name"] == "Northside Jewelers"
+
+
+def test_payer_url_comes_from_send_response():
+    url = inv.payer_url_from_send(fixture("send_invoice"))
+    assert url and url.startswith("https://www.sandbox.paypal.com/invoice/p/#INV2-")
+    assert inv.payer_url_from_send({"href": "x", "rel": "self"}) is None
+
+
+def test_sent_invoice_keeps_past_dates_and_status():
+    g = fixture("get_invoice_sent")
+    assert g["status"] == "UNPAID"
+    assert g["detail"]["payment_term"]["term_type"] == "DUE_ON_DATE_SPECIFIED"
+    assert g["detail"]["invoice_date"] < g["detail"]["payment_term"]["due_date"]
+
+
+def _err(name):
+    e = fixture(name)
+    return PayPalError(e["name"], e["message"], None, e["details"], 422)
+
+
+def test_duplicate_number_is_detected_from_details_not_name():
+    for name in ("create_duplicate_number_error", "create_same_request_id_error"):
+        e = _err(name)
+        assert e.name == "UNPROCESSABLE_ENTITY"
+        assert inv.is_duplicate_number(e)
+    assert not inv.is_duplicate_number(PayPalError("UNPROCESSABLE_ENTITY", "", None, [], 422))
+
+
+def test_record_payment_returns_transaction_id_and_note_token_is_visible():
+    assert fixture("record_payment")["payment_id"]
+    g = fixture("get_invoice_partially_paid")
+    assert g["status"] == "PARTIALLY_PAID"
+    assert any("[MTC:" in (t.get("note") or "") for t in g["payments"]["transactions"])
+
+
+def test_search_item_has_invoice_number():
+    item = fixture("search_invoice_item")
+    assert item["id"].startswith("INV2-") and item["detail"]["invoice_number"].startswith("INV-9")
+
+
+def test_put_adjustment_on_part_paid():
+    g = fixture("get_invoice_after_put")
+    assert g["status"] == "PARTIALLY_PAID" and g["due_amount"]["value"] == "3429.95"
+    assert g["items"][-1]["unit_amount"]["value"] == "-20.00"

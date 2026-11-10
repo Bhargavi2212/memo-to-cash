@@ -80,7 +80,8 @@ npm install
 - Send `invoice_date` and `payment_term: {term_type: DUE_ON_DATE_SPECIFIED, due_date}` so PayPal's due date equals ours (never NET_30 from today).
 - PayPal invoice statuses include UNPAID, PAYMENT_PENDING, PARTIALLY_REFUNDED: store raw in `paypal_status` (TEXT), never in our enum.
 - `PayPal-Request-Id` keys per call: `BACKEND_SCHEMA.md §8`.
-- Unproven (TRD §9 open checks 1–4, 6, 8–11; 5 and 7 closed in P0): PUT on PARTIALLY_PAID; Venmo in sandbox; webhook to Render; LLM latency on real statements; transaction id in record response; past invoice/due dates accepted; tiny recorded amounts accepted; Request-Id honoured on invoice create; duplicate invoice_number error name.
+- Proved in P1 (`scripts/sandbox/p1_open_checks.py`, 2026-11-09): past `invoice_date`/due dates are kept; create with `Prefer: return=representation` returns the full invoice; send returns `{rel: payer-view, href}` (the payer link — no GET needed); record payment returns `{payment_id}`; $0.05 can be recorded; PUT works on PARTIALLY_PAID (answers with a link only). **`PayPal-Request-Id` is NOT honoured on invoice create** (repeat → duplicate number) → resume by search + adopt. **Duplicate number = 422 `UNPROCESSABLE_ENTITY` with `details[].issue == DUPLICATE_INVOICE_NUMBER`** — match the issue, not the name. Bill-to name = `primary_recipients[].billing_info.business_name`; supplier name = `invoicer.business_name`.
+- Unproven (TRD §9 open checks 2, 3, 4): Venmo in sandbox; webhook to Render; LLM latency on real statements.
 
 ## 4b. Sponsor tool: APIMatic Context Plugin for PayPal
 - Installed in Claude Code (see `docs/phases/P0.md §2`). **Use it whenever you write or change a PayPal call** (invoices, orders, webhooks): pull the endpoint/field details from it instead of guessing. Facts in §4 (proved in our sandbox) still win if the two disagree — note any disagreement in `PROJECT.md`.
