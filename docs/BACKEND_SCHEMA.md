@@ -279,7 +279,9 @@ Buyer key = `(buyer_email, demo_session)`; real imports have `demo_session = NUL
 
 **File contract (P1 D20):** one header row containing every column above (unused cells empty); row numbers 1-based, header = row 1; dates ISO `YYYY-MM-DD`; price matches `^\d+(\.\d{1,2})?$`; the file is an **upsert**; counts = entities created / changed (unchanged rows count neither); validate every row first — if any error, write nothing and return all errors `{row, msg}`. Existing buyers are locked with `pg_advisory_xact_lock(buyer_id)` (invariant 9).
 
-**Validation errors (each → row error):** unknown `record_type`; missing required column value; bad date or price; MEMO/LINE/RETURN/INVOICE/INVOICE_LINE referring to an unknown memo or invoice; duplicate key in the file (same memo_no, same memo_no+sku, same invoice_no, same invoice_no+sku); INVOICE_LINE whose SKU has no LINE; a line on two invoices; a SKU both on an invoice and RETURNED; an invoice with zero lines; `issued_on > due_on`; any change (lines, dates, total) to an invoice that already has a `paypal_invoice_id` (mirrored invoices are immutable).
+**References (P1 build B3):** every memo/invoice a row refers to must be declared in the same file — an ERP export is a snapshot of what it covers.
+
+**Validation errors (each → row error):** unknown `record_type`; missing required column value; bad date or price; MEMO/LINE/RETURN/INVOICE/INVOICE_LINE referring to an unknown memo or invoice; duplicate key in the file (same memo_no, same memo_no+sku, same invoice_no, same invoice_no+sku); INVOICE_LINE whose SKU has no LINE; a line on two invoices; a SKU both on an invoice and RETURNED; an invoice with zero lines; an INVOICE_LINE whose memo isn't the invoice's memo (one invoice = one memo, P1 build B5); a RETURN for a SKU with no LINE; `issued_on > due_on`; any change (lines, dates, total) to an invoice that already has a `paypal_invoice_id` (mirrored invoices are immutable).
 
 ## 7. Eval file (`eval/messages.jsonl`)
 Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATION_PLAN) loaded into a test database with D = the eval run date; `"statement":"seed"` names it.
