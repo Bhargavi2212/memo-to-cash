@@ -91,7 +91,7 @@ Memos and lines (same grouping as the buyer sees), invoices with PayPal status, 
 Header: $5,000 · PayPal capture `4CN0…` · <date>. Table: invoice → amount → PayPal status (fetched) → link. Timeline: captured → split → recorded INV-1038 → recorded INV-1042 → webhook received.
 
 ### 4.5 Landing `/`
-"Your buyers get one link: what they kept, what they returned, what they owe — and one button to pay it all on PayPal." Buttons: **Start the demo** (your own copy, ~5 s while PayPal invoices are created; show progress) · **See the supplier side** · **Start again**. Small print: "Sandbox only. Buyer login: … (sandbox)."
+"Your buyers get one link: what they kept, what they returned, what they owe — and one button to pay it all on PayPal." Buttons: **Start the demo** (your own copy, ~5 s while PayPal invoices are created; show progress) · **See the supplier side** · **Start again** (always a brand-new copy; the old one is left behind). If PayPal's sandbox is slow, show the 503 message with a Retry button. Small print: "Sandbox only. Buyer login: … (sandbox)."
 
 ## 5. Copy rules
 Plain words: "You owe", "Returned", "Kept", "Still with you". No jargon (no "AR", "allocation", "remittance" on buyer screens). Money always with 2 decimals and $.

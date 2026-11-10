@@ -80,7 +80,7 @@ npm install
 - Send `invoice_date` and `payment_term: {term_type: DUE_ON_DATE_SPECIFIED, due_date}` so PayPal's due date equals ours (never NET_30 from today).
 - PayPal invoice statuses include UNPAID, PAYMENT_PENDING, PARTIALLY_REFUNDED: store raw in `paypal_status` (TEXT), never in our enum.
 - `PayPal-Request-Id` keys per call: `BACKEND_SCHEMA.md §8`.
-- Unproven (TRD §9 open checks 1–4, 6, 8, 9; 5 and 7 closed in P0): PUT on PARTIALLY_PAID; Venmo in sandbox; webhook to Render; LLM latency on real statements; transaction id in record response; past invoice/due dates accepted; tiny recorded amounts accepted.
+- Unproven (TRD §9 open checks 1–4, 6, 8–11; 5 and 7 closed in P0): PUT on PARTIALLY_PAID; Venmo in sandbox; webhook to Render; LLM latency on real statements; transaction id in record response; past invoice/due dates accepted; tiny recorded amounts accepted; Request-Id honoured on invoice create; duplicate invoice_number error name.
 
 ## 4b. Sponsor tool: APIMatic Context Plugin for PayPal
 - Installed in Claude Code (see `docs/phases/P0.md §2`). **Use it whenever you write or change a PayPal call** (invoices, orders, webhooks): pull the endpoint/field details from it instead of guessing. Facts in §4 (proved in our sandbox) still win if the two disagree — note any disagreement in `PROJECT.md`.
@@ -105,7 +105,7 @@ npm install
   **One exception:** `/capture` (and the sweep/webhook capture path) holds the buyer lock *across* the PayPal capture call — split check → capture (10 s timeout) → write allocations, all in one transaction — so two captures for the same buyer can't both pass the check. No other PayPal call is made while holding a lock.
 - **TypeScript** strict; Next.js App Router; server components by default, client components only for interactivity (pay panel, ask box). Fetch via a tiny typed client in `lib/api.ts`. Tailwind with tokens from `UI_UX.md §3`. Money formatted by one helper `lib/money.ts`.
 - Keep it small: no new dependency without a reason in the commit message. Prefer deleting code to adding abstractions.
-- Tests: `tests/unit` (no DB), `tests/integration` (FastAPI TestClient + PayPal mocked with recorded JSON in `tests/fixtures/paypal/`, **real Postgres** via `TEST_DATABASE_URL` — needed for unique keys and advisory locks), Hypothesis for split. No network except the test database. Locally `TEST_DATABASE_URL` = a Neon branch named `test` (never `dev` or production); in CI a Postgres 16 service container. Each test run migrates to head and truncates tables between tests.
+- Tests: `tests/unit` (no DB), `tests/integration` (FastAPI TestClient + PayPal mocked with recorded JSON in `tests/fixtures/paypal/`, **real Postgres** via `TEST_DATABASE_URL` — needed for unique keys and advisory locks), Hypothesis for split. No network except the test database. Locally `TEST_DATABASE_URL` = the Neon `test` branch **direct (unpooled)** URL (never `dev` or production — conftest refuses if it equals `DATABASE_URL`/`DATABASE_URL_UNPOOLED`); in CI a Postgres 16 service container. Each run drops and recreates `public`, migrates to head; tests needing Postgres are marked `@pytest.mark.db` and truncate after each test. Without `TEST_DATABASE_URL` they skip — unless `REQUIRE_TEST_DB=1` (CI), then they fail.
 
 ## 7. Security & data
 - Never read, print or echo `.env` or secret values. Use env vars; ask the user to set them in the Render dashboard. Secrets are declared **on each service** in `render.yaml` with `sync: false` (values entered in the dashboard); the env group `mtc-shared` holds **non-secret** shared values only.
@@ -128,4 +128,4 @@ npm install
 - If a phase is running late, follow the cut list in `IMPLEMENTATION_PLAN.md`; never cut the invariants in §3.
 
 ## 10. Shortcuts
-`/phase <n>` start a phase · `/verify` run all checks · `/sandbox-smoke` real sandbox run · `/review-money` money/PayPal review checklist.
+`/phase <n>` plan → STOP for review + Bhargavi's "approved" → build · `/verify` run all checks · `/sandbox-smoke` real sandbox run · `/review-money` money/PayPal review checklist.

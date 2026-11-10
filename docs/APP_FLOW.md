@@ -27,7 +27,7 @@ flowchart LR
 5. Pays $5,000 → PayPal popup → sandbox buyer (credentials shown on page) → receipt with split.
 6. "See it as the supplier" → `/supplier` → payment row already split; opens PayPal invoice to confirm; approves the **seeded** proposal ("scratch on the S-120 solitaire, take $20 off" → −$20 on INV-1051 — every demo copy starts with this one pending message + proposal). The judge can also send their own message from the statement.
    - If a visitor clicks "See the supplier side" before starting a demo, `/demo/start` runs first.
-7. "Start again" creates another fresh copy.
+7. "Start again" creates another fresh copy in a **new** demo session (new cookie), so the supplier view always shows exactly one Northside copy. A failed start sets no cookie and leaves nothing reachable.
 
 ## 2. Journey J2 — Buyer pays several invoices at once
 ```mermaid
@@ -97,10 +97,10 @@ sequenceDiagram
 Other labels: RETURN_CLAIM → RETURN_CHECK proposal with evidence MATCH / NO_RECORD / ALREADY_CREDITED; PAYMENT_PROMISE → PROMISE_NOTE (shown on buyer row, pauses reminders until date); DISPUTE/OTHER → REPLY proposal for the supplier to answer.
 
 ## 5. Journey J5 — Supplier imports ERP export
-1. Upload CSV → validate rows (report errors per row, nothing half-written per invoice).
+1. Upload CSV → validate every row first; a file with **any** invalid row writes nothing and returns all errors with row numbers.
 2. Upsert buyers, memos, lines, returns, invoices.
-3. For each invoice without `paypal_invoice_id`: create + send on PayPal (`PayPal-Request-Id` = `<env>-inv-<invoice uid>`) → store id + payer URL.
-4. Summary: created / updated / errors.
+3. For each invoice without `paypal_invoice_id`: create + send on PayPal (`PayPal-Request-Id` = `<env>-inv-<invoice uid>`) → store id + payer URL; on retry search by number first (P1 D4); a failure stores `mirror_error` and increments `mirror_attempts`.
+4. Summary: `{created, updated, errors, mirrored, mirror_errors}` (BACKEND_SCHEMA §2). Endpoint and screen are built in P3; the importer service in P1.
 
 ## 6. Journey J6 — Buyer pays one invoice directly on PayPal's page
 1. PayPal sends `INVOICING.INVOICE.PAID` → `/paypal/webhook`. (`PAYMENT.CAPTURE.COMPLETED` for a statement order → lost-capture recovery, TRD §6b-2.)

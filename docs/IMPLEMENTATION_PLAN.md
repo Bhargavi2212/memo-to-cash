@@ -15,17 +15,18 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 **Done when:** every box in `docs/phases/P0.md §4` is ticked.
 
 ## Phase P1 — Data + PayPal mirror (Mon → Tue morning)
-- [ ] Integration-test database: `tests/conftest.py` migrates `TEST_DATABASE_URL` to head and truncates between tests; CI adds a `postgres:16` service and sets `TEST_DATABASE_URL`
+**Spec: `docs/phases/P1.md` (source of truth for tasks, decisions D1–D25 and done-when).** Summary:
+- [ ] Integration-test database: `tests/conftest.py` resets the schema on `TEST_DATABASE_URL` (Neon `test` branch direct URL, guarded), migrates to head, truncates after each `db` test; CI adds a `postgres:16` service, `TEST_DATABASE_URL` and `REQUIRE_TEST_DB=1`
 - [ ] Every PayPal call built with the APIMatic plugin → row in `docs/APIMATIC.md`, `[apimatic]` in the commit; one screenshot → `docs/img/apimatic-1.png`; **submit APIMatic claim form at end of P1** (repo link)
 - [ ] SQLAlchemy models + Alembic migration for **all tables** in `BACKEND_SCHEMA.md §1`
 - [ ] `services/importer.py` (CSV per BACKEND_SCHEMA §6) + `seed/demo_seed.py`: builds the **§Seed** data as an in-memory CSV with dates computed from D, then runs it **through the importer** (same code path as a real import), then mirrors to PayPal
 - [ ] `paypal/client.py` (token cache, retries, `PayPal-Request-Id`, debug_id logging)
-- [ ] `paypal/invoices.py`: create, send, get, record_payment, put_adjustment, remind, search
+- [ ] `paypal/invoices.py`: create, send, get, search_by_number, record_payment (put_adjustment + remind move to P3)
 - [ ] Mirror on import; idempotent; statement link in each invoice note
 - [ ] `POST /demo/start` (per-visitor copy, suffixed invoice numbers, demo cookie)
-- [ ] **Open checks 1, 8, 9:** PUT on PARTIALLY_PAID invoice; past `invoice_date`/due date accepted; tiny recorded payment accepted (`scripts/sandbox/`)
+- [ ] **Open checks 1, 6, 8, 9, 10, 11** (run early, step 7): PUT on part-paid invoice; transaction id in record-payment response; past `invoice_date`/due date accepted; tiny recorded payment accepted; Request-Id honoured on create; duplicate-number error name (`python -m scripts.sandbox.p1_open_checks`)
 **Tests:** importer (good file, re-import no-op, bad rows), `test_dates.py` (seed offsets, ages, overdue days in America/New_York), client (mocked 5xx retry, 429), mirror idempotency, Request-Id keys use env + uid.
-**Done when:** `/demo/start` (via importer) creates 3 PayPal sandbox invoices with memo refs, suffixed invoice numbers and PayPal due dates equal to ours; re-running the import for the same buyer creates none.
+**Done when:** every box in `docs/phases/P1.md §6` is ticked.
 
 ## Phase P2 — Statement + one-payment-many-invoices (Tue)
 - [ ] `core/split.py` pure function + Hypothesis property tests
@@ -39,7 +40,10 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 ## Phase P3 — Supplier side + webhooks (Tue evening)
 - [ ] Supplier overview (4.3), buyer detail, payment detail (4.4); `ADMIN_TOKEN` + demo "view as supplier"
 - [ ] Webhook route: verify signature, store, process `INVOICING.INVOICE.PAID/CANCELLED/REFUNDED`, `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.*`
+- [ ] `paypal/invoices.py`: `put_adjustment` (strip rule) + `remind` (moved from P1)
 - [ ] Proposals API + decide → adjustment PUT / remind (2/day guard)
+- [ ] `POST /supplier/import` endpoint (admin, multipart; add `python-multipart`) calling the P1 importer + mirror; `seed/sample_export.csv` generated from `services/demo.build_csv(today)` (moved from P1)
+- [ ] Optional: `/api/health/deep` reuses the P1 PayPal client
 - [ ] Record off-PayPal payment (J8, same RECORDING flow) + copy statement link
 - [ ] `services/sync.py::sweep` + `backend/worker.py` (loop every 30 s + daily reminder drafting) + worker service added to `render.yaml`
 - [ ] Register webhook URL in PayPal dashboard → `PAYPAL_WEBHOOK_ID`; dedupe by transaction id (TRD §6b)
@@ -50,6 +54,7 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 ## Phase P4 — Agent + eval (Wed morning)
 - [ ] `agent/llm.py` (OpenAI client → Meta Model API, timeout, reasoning effort, usage caps)
 - [ ] Job A answer (tools + validator), Job B triage (validator + proposal), Job C reminder draft
+- [ ] Replace the seeded proposal with a live one: at demo start the agent triages the seeded S-120 message and creates the proposal (P1 D17), so the AI judges see is real
 - [ ] `eval/messages.jsonl` (30: real redacted first), `eval/baseline.py`, `eval/run_eval.py` (`python -m eval.run_eval`)
 - [ ] Prompt-injection cases in eval
 - [ ] **Open check 4:** LLM latency on real statements; eval picks `muse-ember-1.0` vs backup `muse-spark-1.3` (7 closed in P0)

@@ -20,8 +20,10 @@ CREATE TABLE buyers (
   statement_token TEXT NOT NULL UNIQUE,          -- secrets.token_urlsafe(32)
   is_demo BOOLEAN NOT NULL DEFAULT false,
   demo_session TEXT,                             -- set for per-visitor demo copies
+  demo_ready BOOLEAN NOT NULL DEFAULT false,     -- demo copy: true only after every invoice mirrored (P1 D9); demo queries require it
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX buyers_real_email ON buyers (email) WHERE demo_session IS NULL;   -- P1 D2
 
 CREATE TABLE memos (
   id BIGSERIAL PRIMARY KEY,
@@ -63,6 +65,8 @@ CREATE TABLE invoices (
   paypal_due_cents BIGINT,                       -- PayPal's due_amount at last sync
   paypal_synced_at TIMESTAMPTZ,
   mismatch TEXT,                                 -- set when PayPal due != our due; shown to supplier
+  mirror_error TEXT,                             -- last PayPal error while mirroring (create/send), shown to supplier
+  mirror_attempts INT NOT NULL DEFAULT 0,
   CHECK (paid_cents <= total_cents),
   UNIQUE (buyer_id, erp_invoice_no)
 );
@@ -75,6 +79,8 @@ CREATE TABLE invoice_lines (
   name TEXT NOT NULL,
   amount_cents BIGINT NOT NULL                    -- negative for adjustments
 );
+CREATE UNIQUE INDEX invoice_lines_inv_line ON invoice_lines (invoice_id, memo_line_id) WHERE memo_line_id IS NOT NULL;
+CREATE UNIQUE INDEX invoice_lines_one_invoice ON invoice_lines (memo_line_id) WHERE memo_line_id IS NOT NULL;   -- a kept line is on exactly one invoice (P1 D21)
 
 CREATE TABLE payments (
   id BIGSERIAL PRIMARY KEY,
@@ -188,15 +194,15 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | GET | `/supplier/proposals?status=PENDING` | admin | → `[Proposal]` |
 | POST | `/supplier/proposals/{id}/decide` | admin | `{decision: APPROVE|REJECT, edits?}` → `Proposal` |
 | GET | `/supplier/payments/{id}` | admin | → payment + allocations + PayPal statuses + audit |
-| POST | `/supplier/import` | admin | multipart CSV → `{created, updated, errors:[{row, msg}]}` |
+| POST | `/supplier/import` | admin | multipart CSV → `{created, updated, errors:[{row, msg}], mirrored, mirror_errors:[{invoice_no, msg}]}` |
 | POST | `/supplier/sync/{invoice_id}` | admin | → refreshed invoice from PayPal |
 | POST | `/paypal/webhook` | paypal | PayPal event → 200 always after storing; processes idempotently |
 | GET | `/statement/{token}/payments/{id}` | public | → `Receipt` (for the receipt page) |
 | GET | `/supplier/buyers/{id}` | admin/demo | → buyer, memos, invoices, messages, proposals, payments, statement link |
 | POST | `/supplier/payments/record` | admin/demo | `{buyer_id, method: CHECK|WIRE_TRANSFER|OTHER, reference, amount_cents, invoice_ids?}` → payment + allocations |
-| POST | `/demo/start` | public (DEMO_MODE, ≤ 5 per IP per hour) | → creates a fresh demo buyer from the seed (invoice numbers suffixed `-<6 chars>`), mirrors to PayPal, sets demo cookie → `{statement_token}` |
+| POST | `/demo/start` | public (DEMO_MODE, ≤ 15 per IP per hour, ≤ 60 per hour overall) | → creates a fresh demo buyer from the seed (invoice numbers suffixed `-<6 chars>`), mirrors to PayPal, sets demo cookie → `{statement_token, buyer_id, ms}` |
 
-Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknown token, 409 only for `STATEMENT_CHANGED` (an already-captured payment returns its existing receipt with 200), 502 PayPal failure (state saved, retry shown).
+Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknown token, 429 `RATE_LIMITED` / `DEMO_HOURLY_LIMIT`, 503 `NOT_CONFIGURED` (lists missing setting names, never values) / `PAYPAL_UNAVAILABLE` (transient: 5xx/429/timeout after retries, or the 20 s demo deadline), 502 `PAYPAL_REJECTED` (deterministic PayPal 4xx during demo start; debug_id logged), 409 only for `STATEMENT_CHANGED` (an already-captured payment returns its existing receipt with 200), 502 PayPal failure (state saved, retry shown).
 
 ## 3. Response shapes
 ```jsonc
@@ -230,11 +236,11 @@ Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknow
 { "detail": { "currency_code": "USD", "invoice_number": "<paypal_invoice_number>", "reference": "M-201",
               "invoice_date": "<issued_on, YYYY-MM-DD>",
               "payment_term": {"term_type": "DUE_ON_DATE_SPECIFIED", "due_date": "<due_on, YYYY-MM-DD>"},
-              "memo": "Kept from memo M-201",
-              "note": "See everything you owe and pay several invoices at once: <APP_BASE_URL>/s/<token>" },
-  "invoicer": { "email_address": "<PAYPAL_BUSINESS_EMAIL>" },
+              "memo": "Kept from memo M-201 · ERP INV-1038",          // private to the merchant
+              "note": "See everything you owe and pay several invoices at once: <APP_BASE_URL>/s/<token>" },   // visible to the buyer
+  "invoicer": { "email_address": "<PAYPAL_BUSINESS_EMAIL>", "business_name": "<SUPPLIER_NAME>" },   // field path CONFIRMED via APIMatic in P1 step 6 (D7); bill-to name "Northside Jewelers" in billing_info, path confirmed there too,
   "primary_recipients": [{ "billing_info": { "email_address": "<buyer email>" } }],
-  "items": [{ "name": "S-104 Stud pair (memo M-201)", "quantity": "1",
+  "items": [{ "name": "S-104 Stud pair (memo M-201)", "description": "SKU S-104 · memo M-201", "quantity": "1",
               "unit_amount": {"currency_code": "USD", "value": "1150.00"} }],
   "configuration": { "partial_payment": { "allow_partial_payment": true,
                      "minimum_amount_due": {"currency_code": "USD", "value": "1.00"} } } }
@@ -269,7 +275,11 @@ Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknow
 | RETURN | memo_no, sku, returned_on, return_ref |
 | INVOICE | invoice_no, memo_no, issued_on, due_on |
 | INVOICE_LINE | invoice_no, memo_no, sku |
-Rules: a line on an INVOICE becomes KEPT; a RETURN makes it RETURNED; otherwise OUT. A SKU can't be both. Prices in dollars with 2 decimals → cents.
+Buyer key = `(buyer_email, demo_session)`; real imports have `demo_session = NULL` (update the existing buyer); each demo copy creates a new buyer. Rules: a line on an INVOICE becomes KEPT; a RETURN makes it RETURNED; otherwise OUT. Prices in dollars → cents.
+
+**File contract (P1 D20):** one header row containing every column above (unused cells empty); row numbers 1-based, header = row 1; dates ISO `YYYY-MM-DD`; price matches `^\d+(\.\d{1,2})?$`; the file is an **upsert**; counts = entities created / changed (unchanged rows count neither); validate every row first — if any error, write nothing and return all errors `{row, msg}`. Existing buyers are locked with `pg_advisory_xact_lock(buyer_id)` (invariant 9).
+
+**Validation errors (each → row error):** unknown `record_type`; missing required column value; bad date or price; MEMO/LINE/RETURN/INVOICE/INVOICE_LINE referring to an unknown memo or invoice; duplicate key in the file (same memo_no, same memo_no+sku, same invoice_no, same invoice_no+sku); INVOICE_LINE whose SKU has no LINE; a line on two invoices; a SKU both on an invoice and RETURNED; an invoice with zero lines; `issued_on > due_on`; any change (lines, dates, total) to an invoice that already has a `paypal_invoice_id` (mirrored invoices are immutable).
 
 ## 7. Eval file (`eval/messages.jsonl`)
 Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATION_PLAN) loaded into a test database with D = the eval run date; `"statement":"seed"` names it.
@@ -282,9 +292,16 @@ Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATIO
 | `/statement/{token}/*` | statement token only |
 | `/supplier/overview`, `/supplier/buyers/{id}`, `/supplier/payments/{id}`, `/supplier/proposals*`, `/supplier/payments/record` | admin **or** demo cookie (demo sees only its own session's buyers) |
 | `/supplier/import`, `/supplier/sync/{id}` | admin only (demo visitors cannot import) |
-| `/demo/start` | public, DEMO_MODE, ≤ 5 per IP-hash per hour (`demo_rate`); client IP = first address in `X-Forwarded-For` (set by Render's edge, passed on by the web proxy) — spoofable by calling the api directly, acceptable for a demo limit |
+| `/demo/start` | public, DEMO_MODE, ≤ 15 per IP-hash per hour (429 `RATE_LIMITED`) and ≤ 60 per hour overall (429 `DEMO_HOURLY_LIMIT`), hour buckets in **UTC** (`demo_rate`, `ip_hash='global'`, atomic upsert, counted **only on success**; WARNING log at 80% of global); client IP = first address in `X-Forwarded-For` (set by Render's edge, passed on by the web proxy), else the socket address — spoofable by calling the api directly, acceptable for a sandbox demo |
 | `/paypal/webhook` | PayPal signature |
 | `/health` public · `/health/deep` admin only | |
+
+**Demo copies:** every `/demo/start` (incl. "Start again") creates a **new** `demo_session` and buyer; the signed cookie `mtc_demo` (7 days, HttpOnly, Secure, SameSite=Lax) is set only after a successful start; every demo query also requires `buyers.demo_ready = true` (P1 D8, D9).
+
+**Proposal shapes** (`proposals.payload` / `proposals.evidence`)
+- ADJUSTMENT: `payload = {invoice_id, amount_cents, reason}` — `amount_cents` negative (reduces the invoice, same sign as `invoice_lines`); `evidence = {source: "seed"|"agent", checks: [...], records: [...]}`.
+- Seed (P1 D3): message `kind="MESSAGE"`, `ai_result={"seeded": true}`, audit actor `system`; one ADJUSTMENT −2000 on INV-1051. P4 replaces it with a proposal the live agent creates at demo start.
+- REMINDER and other kinds are defined in P3/P4 specs.
 
 **Preview / order defaults** (`/preview`, `/order`, `/supplier/payments/record`)
 - neither `invoice_ids` nor `amount_cents` → all open invoices, full balance.
