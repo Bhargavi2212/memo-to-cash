@@ -80,11 +80,13 @@ npm install
 - Send `invoice_date` and `payment_term: {term_type: DUE_ON_DATE_SPECIFIED, due_date}` so PayPal's due date equals ours (never NET_30 from today).
 - PayPal invoice statuses include UNPAID, PAYMENT_PENDING, PARTIALLY_REFUNDED: store raw in `paypal_status` (TEXT), never in our enum.
 - `PayPal-Request-Id` keys per call: `BACKEND_SCHEMA.md §8`.
-- Unproven (TRD §9 open checks 1–4, 6, 8–11; 5 and 7 closed in P0): PUT on PARTIALLY_PAID; Venmo in sandbox; webhook to Render; LLM latency on real statements; transaction id in record response; past invoice/due dates accepted; tiny recorded amounts accepted; Request-Id honoured on invoice create; duplicate invoice_number error name.
+- Proved in P1 (`scripts/sandbox/p1_open_checks.py`, 2026-11-09): past `invoice_date`/due dates are kept; create with `Prefer: return=representation` returns the full invoice; send returns `{rel: payer-view, href}` (the payer link — no GET needed); record payment returns `{payment_id}`; $0.05 can be recorded; PUT works on PARTIALLY_PAID (answers with a link only). **`PayPal-Request-Id` is NOT honoured on invoice create** (repeat → duplicate number) → resume by search + adopt. **Duplicate number = 422 `UNPROCESSABLE_ENTITY` with `details[].issue == DUPLICATE_INVOICE_NUMBER`** — match the issue, not the name. Bill-to name = `primary_recipients[].billing_info.business_name`; supplier name = `invoicer.business_name`.
+- Unproven (TRD §9 open checks 2, 3, 4): Venmo in sandbox; webhook to Render; LLM latency on real statements.
 
 ## 4b. Sponsor tool: APIMatic Context Plugin for PayPal
 - Installed in Claude Code (see `docs/phases/P0.md §2`). **Use it whenever you write or change a PayPal call** (invoices, orders, webhooks): pull the endpoint/field details from it instead of guessing. Facts in §4 (proved in our sandbox) still win if the two disagree — note any disagreement in `PROJECT.md`.
-- Mention it in commit messages that touch PayPal code (`feat(p1): mirror invoices (FR-2) [apimatic]`).
+- **Coverage:** ContextMatic's PayPal context is the PayPal Server SDK (Orders, Payments, Vault, Transaction Search, Subscriptions) — **no Invoicing v2**. Invoicing calls are built from §4 sandbox facts + PayPal's docs, without the `[apimatic]` tag (P1 D23). It told us `PayPal-Request-Id` is kept only 6 h → recovery relies on the `[MTC:<uid>]` token and capture-id checks (TRD §6b-5).
+- Mention it in commit messages that touch PayPal code it covered (`feat(p1): mirror invoices (FR-2) [apimatic]`).
 - **Proof is required for the sponsor claim** (APIMatic's form asks for a repo link that *shows* plugin usage): after each PayPal call you build or change, add a row to `docs/APIMATIC.md` (what was asked, what it returned, file + commit) in the same commit. Ask Bhargavi to take a screenshot of one plugin lookup in P1 → `docs/img/apimatic-1.png`.
 
 ## 5. AI agent rules

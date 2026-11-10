@@ -14,11 +14,24 @@ concurrency:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      postgres: # integration tests need real Postgres (unique keys, advisory locks) — P1 D12
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
     env:
-      # Dummy, non-secret values: tests mock DB, PayPal and the LLM. No secrets in CI.
+      # Non-secret values: PayPal and the LLM are mocked; the DB is the throwaway service above.
       APP_ENV: test
       PAYPAL_BASE_URL: https://api-m.sandbox.paypal.com
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      REQUIRE_TEST_DB: "1" # db tests fail instead of skipping
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,7 +44,7 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest -q
+      - run: pytest -q -rs # -rs lists skipped tests, so a skipped db test is visible
 
   web:
     runs-on: ubuntu-latest

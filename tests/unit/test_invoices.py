@@ -1,0 +1,224 @@
+"""Invoice body builder and pure helpers (P1 step 3, D7, D22, R1, R7).
+
+Response handling (create/send/get/search/record) is tested on real, redacted sandbox
+fixtures recorded by the open-checks script (step 4), not on hand-written ones.
+"""
+
+import pytest
+from pydantic import SecretStr
+
+from backend.core.config import load_settings
+from backend.core.dates import offset, today_ny
+from backend.paypal import invoices as inv
+
+D = today_ny()
+
+
+@pytest.fixture
+def settings():
+    return load_settings(
+        _env_file=None,
+        app_env="test",
+        app_base_url="https://memo-to-cash-web.onrender.com/",
+        paypal_business_email="supplier@example.com",
+        paypal_client_id="id",
+        paypal_client_secret=SecretStr("s"),
+    )
+
+
+def draft(**kw) -> inv.InvoiceDraft:
+    base = dict(
+        uid="11111111-2222-3333-4444-555555555555",
+        paypal_invoice_number="INV-1038-k3x9q2",
+        erp_invoice_no="INV-1038",
+        memo_no="M-201",
+        issued_on=offset(D, -48),
+        due_on=offset(D, -18),
+        lines=(
+            inv.DraftLine("S-101", "Round 1.01ct", 235000),
+            inv.DraftLine("S-104", "Stud pair", 115000),
+        ),
+        buyer_name="Northside Jewelers",
+        buyer_email="buyer@example.com",
+        statement_token="tok123",
+    )
+    return inv.InvoiceDraft(**(base | kw))
+
+
+def test_body_dates_and_terms(settings):
+    b = inv.build_body(draft(), settings, today=D)
+    d = b["detail"]
+    assert d["invoice_date"] == offset(D, -48).isoformat()
+    assert d["payment_term"] == {
+        "term_type": "DUE_ON_DATE_SPECIFIED",
+        "due_date": offset(D, -18).isoformat(),
+    }
+    assert d["invoice_number"] == "INV-1038-k3x9q2" and d["reference"] == "M-201"
+    assert d["currency_code"] == "USD"
+
+
+def test_body_note_memo_names(settings):
+    b = inv.build_body(draft(), settings, today=D)
+    assert b["detail"]["note"].endswith("https://memo-to-cash-web.onrender.com/s/tok123")
+    assert b["detail"]["memo"] == "Kept from memo M-201 · ERP INV-1038"
+    assert b["invoicer"] == {
+        "email_address": "supplier@example.com",
+        "business_name": "Demo Diamond Co.",
+    }
+    assert b["primary_recipients"] == [
+        {
+            "billing_info": {
+                "business_name": "Northside Jewelers",
+                "email_address": "buyer@example.com",
+            }
+        }
+    ]
+
+
+def test_body_items_are_strings_in_dollars(settings):
+    items = inv.build_body(draft(), settings, today=D)["items"]
+    assert items[1] == {
+        "name": "S-104 Stud pair (memo M-201)",
+        "description": "SKU S-104 · memo M-201",
+        "quantity": "1",
+        "unit_amount": {"currency_code": "USD", "value": "1150.00"},
+    }
+    assert [i["unit_amount"]["value"] for i in items] == ["2350.00", "1150.00"]
+
+
+def test_body_partial_payment_on(settings):
+    cfg = inv.build_body(draft(), settings, today=D)["configuration"]
+    assert cfg == {
+        "partial_payment": {
+            "allow_partial_payment": True,
+            "minimum_amount_due": {"currency_code": "USD", "value": "1.00"},
+        }
+    }
+
+
+def test_past_dates_fallback_d22(settings):
+    s = settings.model_copy(update={"paypal_past_dates_ok": False})
+    b = inv.build_body(draft(), s, today=D)
+    assert b["detail"]["invoice_date"] == D.isoformat()
+    assert b["detail"]["payment_term"]["due_date"] == D.isoformat()  # max(today, D-18)
+    later = draft(issued_on=offset(D, -5), due_on=offset(D, 25))
+    assert inv.expected_dates(later, s, D) == (D, offset(D, 25))
+    assert inv.expected_dates(later, settings, D) == (offset(D, -5), offset(D, 25))
+
+
+@pytest.mark.parametrize("field", ["app_base_url", "paypal_business_email"])
+def test_body_refuses_missing_settings(settings, field):
+    with pytest.raises(inv.NotConfiguredError) as e:
+        inv.build_body(draft(), settings.model_copy(update={field: None}), today=D)
+    assert e.value.missing == [field.upper()]
+
+
+def test_invoice_id_from_href():
+    href = "https://api-m.sandbox.paypal.com/v2/invoicing/invoices/INV2-ABCD-1234"
+    assert inv.invoice_id_from_href(href) == "INV2-ABCD-1234"
+    assert inv.invoice_id_from_href(href + "/") == "INV2-ABCD-1234"
+
+
+def test_record_payment_body_has_no_payment_id():
+    b = inv.record_payment_body(amount_cents=5, method="PAYPAL", payment_date=D, note="x")
+    assert b == {
+        "method": "PAYPAL",
+        "payment_date": D.isoformat(),
+        "amount": {"currency_code": "USD", "value": "0.05"},
+        "note": "x",
+    }
+    assert "payment_id" not in b
+
+
+@pytest.mark.parametrize(
+    ("kw", "msg"),
+    [
+        ({"method": "BITCOIN"}, "method"),
+        ({"amount_cents": 0}, "positive"),
+        ({"amount_cents": 1.5}, "positive"),
+    ],
+)
+def test_record_payment_body_rejects(kw, msg):
+    args = dict(amount_cents=100, method="CHECK", payment_date=D, note="n") | kw
+    with pytest.raises(ValueError, match=msg):
+        inv.record_payment_body(**args)
+
+
+@pytest.mark.anyio
+async def test_record_payment_requires_mtc_token(settings):
+    with pytest.raises(ValueError, match=r"\[MTC:"):
+        await inv.record_payment(
+            None,  # type: ignore[arg-type]  # refused before any PayPal call
+            "INV2-1",
+            allocation_uid="abc",
+            amount_cents=100,
+            method="PAYPAL",
+            payment_date=D,
+            note="no token here",
+        )
+
+
+# ---- response handling on REAL redacted sandbox fixtures (step 4, review R7) ----
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from backend.paypal.client import PayPalError  # noqa: E402
+
+FIX = Path(__file__).resolve().parents[1] / "fixtures" / "paypal"
+
+
+def fixture(name: str):
+    return json.loads((FIX / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def test_create_returns_full_invoice_with_id():
+    body = fixture("create_invoice")
+    assert body["id"].startswith("INV2-") and body["status"] == "DRAFT"
+    assert body["due_amount"] == {"currency_code": "USD", "value": "3500.00"}
+    assert body["invoicer"]["business_name"] == "Demo Diamond Co."
+    assert body["primary_recipients"][0]["billing_info"]["business_name"] == "Northside Jewelers"
+
+
+def test_payer_url_comes_from_send_response():
+    url = inv.payer_url_from_send(fixture("send_invoice"))
+    assert url and url.startswith("https://www.sandbox.paypal.com/invoice/p/#INV2-")
+    assert inv.payer_url_from_send({"href": "x", "rel": "self"}) is None
+
+
+def test_sent_invoice_keeps_past_dates_and_status():
+    g = fixture("get_invoice_sent")
+    assert g["status"] == "UNPAID"
+    assert g["detail"]["payment_term"]["term_type"] == "DUE_ON_DATE_SPECIFIED"
+    assert g["detail"]["invoice_date"] < g["detail"]["payment_term"]["due_date"]
+
+
+def _err(name):
+    e = fixture(name)
+    return PayPalError(e["name"], e["message"], None, e["details"], 422)
+
+
+def test_duplicate_number_is_detected_from_details_not_name():
+    for name in ("create_duplicate_number_error", "create_same_request_id_error"):
+        e = _err(name)
+        assert e.name == "UNPROCESSABLE_ENTITY"
+        assert inv.is_duplicate_number(e)
+    assert not inv.is_duplicate_number(PayPalError("UNPROCESSABLE_ENTITY", "", None, [], 422))
+
+
+def test_record_payment_returns_transaction_id_and_note_token_is_visible():
+    assert fixture("record_payment")["payment_id"]
+    g = fixture("get_invoice_partially_paid")
+    assert g["status"] == "PARTIALLY_PAID"
+    assert any("[MTC:" in (t.get("note") or "") for t in g["payments"]["transactions"])
+
+
+def test_search_item_has_invoice_number():
+    item = fixture("search_invoice_item")
+    assert item["id"].startswith("INV2-") and item["detail"]["invoice_number"].startswith("INV-9")
+
+
+def test_put_adjustment_on_part_paid():
+    g = fixture("get_invoice_after_put")
+    assert g["status"] == "PARTIALLY_PAID" and g["due_amount"]["value"] == "3429.95"
+    assert g["items"][-1]["unit_amount"]["value"] == "-20.00"

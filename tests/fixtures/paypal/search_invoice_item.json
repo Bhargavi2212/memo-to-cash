@@ -1,0 +1,67 @@
+{
+  "amount": {
+    "currency_code": "USD",
+    "value": "3500.00"
+  },
+  "detail": {
+    "currency_code": "USD",
+    "group_draft": false,
+    "invoice_date": "2026-09-22",
+    "invoice_number": "INV-9634-c0dyzq",
+    "memo": "Kept from memo M-201 \u00b7 ERP INV-9001",
+    "metadata": {
+      "create_time": "2026-11-10T03:28:21Z"
+    },
+    "note": "See everything you owe and pay several invoices at once: http://localhost:3000/s/open-checks-token",
+    "payment_term": {
+      "due_date": "2026-10-22"
+    },
+    "reference": "M-201",
+    "viewed_by_recipient": false
+  },
+  "due_amount": {
+    "currency_code": "USD",
+    "value": "3500.00"
+  },
+  "id": "INV2-6S6N-GRZF-WAZZ-5KD8",
+  "invoicer": {
+    "email_address": "supplier@example.com"
+  },
+  "links": [
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-6S6N-GRZF-WAZZ-5KD8",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-6S6N-GRZF-WAZZ-5KD8/send",
+      "method": "POST",
+      "rel": "send"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-6S6N-GRZF-WAZZ-5KD8",
+      "method": "PUT",
+      "rel": "replace"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-6S6N-GRZF-WAZZ-5KD8",
+      "method": "DELETE",
+      "rel": "delete"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-6S6N-GRZF-WAZZ-5KD8/payments",
+      "method": "POST",
+      "rel": "record-payment"
+    }
+  ],
+  "primary_recipients": [
+    {
+      "billing_info": {
+        "business_name": "Northside Jewelers",
+        "email_address": "buyer@example.com"
+      }
+    }
+  ],
+  "status": "DRAFT",
+  "unilateral": false
+}

@@ -4,9 +4,14 @@ Every route lives under /api, including the docs, because the web service's prox
 forwards only /api/* to this service.
 """
 
+import logging
+
 from fastapi import FastAPI
 
-from backend.routes import health
+from backend.routes import demo, health
+
+# PayPal/LLM code logs method, path, status, ms and debug_id — never bodies with emails or tokens.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(
     title="Memo-to-Cash",
@@ -15,3 +20,4 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(health.router)
+app.include_router(demo.router)

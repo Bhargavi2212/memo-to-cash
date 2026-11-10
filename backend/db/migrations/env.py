@@ -4,9 +4,10 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 from backend.core.config import settings, sqlalchemy_url
+from backend.db.models import Base
 from backend.db.session import connect_args
 
-target_metadata = None  # models arrive in P1 (backend/db/models.py)
+target_metadata = Base.metadata
 
 
 def _url() -> str:

@@ -120,3 +120,19 @@ def test_llm_model_and_reasoning_effort_are_settings(env):
     env.setenv("LLM_REASONING_EFFORT", "medium")
     s = load_settings(_env_file=None)
     assert (s.llm_model, s.llm_reasoning_effort) == ("muse-spark-1.3", "medium")
+
+
+def test_p1_defaults(env):
+    env.delenv("SUPPLIER_NAME", raising=False)
+    env.delenv("PAYPAL_PAST_DATES_OK", raising=False)
+    s = load_settings(_env_file=None)
+    assert s.supplier_name == "Demo Diamond Co."
+    assert s.paypal_past_dates_ok is True
+
+
+def test_p1_settings_from_env(env):
+    env.setenv("SUPPLIER_NAME", "Other Supplier")
+    env.setenv("PAYPAL_PAST_DATES_OK", "false")
+    s = load_settings(_env_file=None)
+    assert s.supplier_name == "Other Supplier"
+    assert s.paypal_past_dates_ok is False

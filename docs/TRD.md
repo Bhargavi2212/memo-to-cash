@@ -10,7 +10,7 @@ Status: v1 (Nov 9, 2026). Read with `PRD.md`, `APP_FLOW.md`, `BACKEND_SCHEMA.md`
 | Backend | Python 3.12, FastAPI (`backend/main.py`, uvicorn) — Render web service; plus a Render **background worker** (`backend/worker.py`, P3) | Money logic in Python; always-on server, real background jobs |
 | DB | Neon Postgres (neon.tech; branches `main`=prod, `dev`, `test`), SQLAlchemy 2 + Alembic | Free, doesn't expire before judging, branches for dev/test |
 | AI | Meta Model API, `muse-ember-1.0` (reasoning effort `low`), base `https://api.meta.ai/v1` (OpenAI client); backup `muse-spark-1.3`; final model chosen by the P4 eval | JSON-schema output + tool calling; ~1.1 s per call in the P0 test |
-| Hosting | **Render** (sponsor) via `render.yaml` Blueprint: web + api (+ worker from P3), Starter plan | Always on (no sleep), paid by hackathon credits through Dec 15; eligible for Render's sponsor prize |
+| Hosting | **Render** (sponsor) via `render.yaml` Blueprint: web + api (+ worker from P3), plan `0.5c-512mb` (0.5 CPU / 512 MB, $7/mo each; formerly "Starter") | Always on (no sleep), paid by hackathon credits through Dec 15; eligible for Render's sponsor prize |
 | Dev tooling | **APIMatic Context Plugin for PayPal** in Claude Code (sponsor tool) | PayPal API context while building; qualifies for the APIMatic sponsor prize |
 | CI | GitHub Actions: pytest, ruff, `tsc --noEmit`, eslint | Green before every deploy |
 
@@ -96,13 +96,16 @@ Allocation in `RECORDING` for > 5 min, or before any retry of a record call: GET
 ## 6b-4. The sweep (all pending work, one function)
 A single function `services/sync.py::sweep(scope)` processes: unprocessed webhook events, `CREATED` payments > 2 min, `RECORDING`/`FAILED` allocations. It runs (a) at the end of every webhook request (that invoice/order only), (b) in the **Render background worker** (`backend/worker.py`, from P3): a loop every **30 s** over all rows, plus the once-a-day reminder drafting (J7) at 09:00 America/New_York. Page loads never run it. The admin "sync" button calls the same function.
 
+## 6b-5. `PayPal-Request-Id` only protects for 6 hours
+PayPal keeps a `PayPal-Request-Id` for **6 hours** on create-order and capture (APIMatic ContextMatic lookup, P1 — `docs/APIMATIC.md`; extendable to 72 h only via a PayPal account manager). Assume the same or shorter for Invoicing calls (open check 10 tests only an immediate repeat). The sweep can retry later than that, so after 6 h a reused Request-Id **no longer prevents a duplicate**. Recovery therefore never relies on it: before any retry, record-payment first searches the invoice for the exact `[MTC:<allocation uid>]` note token (§6b-3), and capture first checks our payment state, the order status (GET) and the unique `paypal_capture_id` (§6b-2). Request-Id stays on every write as the first, short-window guard only.
+
 ## 6c. Out of scope v1 (explicit)
 Refund/reversal handling of statement payments (shown, not automated), our own email sending, tax/shipping, multi-currency, real ERP connectors, multiple suppliers per account.
 
 ## 7. Configuration
 `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_BASE_URL` (sandbox only), `PAYPAL_WEBHOOK_ID`, `PAYPAL_BUSINESS_EMAIL`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `DATABASE_URL` (Neon **pooled** connection string, used by the app), `DATABASE_URL_UNPOOLED` (direct, used only by Alembic migrations), `TEST_DATABASE_URL` (integration tests only: Neon `test` branch **direct/unpooled** URL locally, Postgres service in CI; conftest refuses if it equals `DATABASE_URL`/`DATABASE_URL_UNPOOLED`), `REQUIRE_TEST_DB` (CI sets `1`: DB tests fail instead of skipping), `PAYPAL_PAST_DATES_OK` (default true; false = send today's dates to PayPal if open check 8 fails, P1 D22), `ADMIN_TOKEN`, `DEMO_MODE=true`, `DEMO_COOKIE_SECRET`, `SANDBOX_BUYER_EMAIL` and `SANDBOX_BUYER_PASSWORD` (the sandbox **personal** account — every demo buyer uses this email so it can pay; both shown on the demo page; sandbox only), `IP_HASH_SECRET` (for `demo_rate` IP hashing), `APP_ENV` (`dev`|`prod`|`test`, prefixes PayPal-Request-Id keys), `SUPPLIER_NAME` (default "Demo Diamond Co."; one supplier per deployment), `APP_BASE_URL` (the **web** address; no fallback), `API_PUBLIC_URL` (the api's public address, for the PayPal webhook), `API_INTERNAL_HOSTPORT` (web service only, from Render `hostport`; optional override `API_INTERNAL_BASE`).
 
-**Render setup:** `render.yaml` Blueprint defines the services (api: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`; web: `npm start` with the runtime proxy route forwarding `/api/*` to `http://$API_INTERNAL_HOSTPORT`; worker from P3: `python -m backend.worker`), plan Starter, shared env group for non-secret values only; secrets declared per service with `sync: false` (not allowed in env groups). Python deps in `requirements.txt`. Alembic migrations are run by hand against Neon (dev, then prod at merge), never in the build. PayPal JS SDK loads with `buyer-country=US` in sandbox so the Venmo button can render. Register the webhook URL **on the api service directly** (`<API_PUBLIC_URL>/api/paypal/webhook`, not through the web proxy, so PayPal's signature headers and raw body arrive untouched) in the PayPal developer dashboard for the sandbox app and copy its id to `PAYPAL_WEBHOOK_ID`.
+**Render setup:** `render.yaml` Blueprint defines the services (api: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`; web: `npm start` with the runtime proxy route forwarding `/api/*` to `http://$API_INTERNAL_HOSTPORT`; worker from P3: `python -m backend.worker`), plan `0.5c-512mb`, shared env group for non-secret values only; secrets declared per service with `sync: false` (not allowed in env groups). Python deps in `requirements.txt`. Alembic migrations are run by hand against Neon (dev, then prod at merge), never in the build. PayPal JS SDK loads with `buyer-country=US` in sandbox so the Venmo button can render. Register the webhook URL **on the api service directly** (`<API_PUBLIC_URL>/api/paypal/webhook`, not through the web proxy, so PayPal's signature headers and raw body arrive untouched) in the PayPal developer dashboard for the sandbox app and copy its id to `PAYPAL_WEBHOOK_ID`.
 
 ## 8. Testing
 - Unit: money, split (Hypothesis property tests), importer, validators.
@@ -111,16 +114,16 @@ Refund/reversal handling of statement payments (shown, not automated), our own e
 - Eval: `python -m eval.run_eval`.
 
 ## 9. Open checks (do in P1–P3)
-1. PUT adjustment on a PARTIALLY_PAID invoice.
+1. ✅ (P1) PUT adjustment on a PARTIALLY_PAID invoice works (strip rule; `?send_to_recipient=false&send_to_invoicer=false`; PUT answers with a link → GET for the new due).
 2. Venmo button renders in sandbox; whether a sandbox Venmo payment can complete.
 3. Webhook delivery to the Render URL; signature verification.
 4. LLM tool-calling latency acceptable for the ask box (< 8 s) on real statements (P4 eval). P0: 1.2–1.8 s for tool call + answer on a tiny case.
 5. ✅ (P0) LLM key + model id: Meta Model API key works at `api.meta.ai/v1`; `muse-ember-1.0` available. (The old Llama API `api.llama.com` rejects Model API keys.) Deep health on Render re-confirms after deploy.
-6. Record-payment response returns a PayPal transaction id (dedupe still works via the `[MTC:<uid>]` note token if not).
+6. ✅ (P1) Record-payment returns `{payment_id}` (the transaction id) — store it in `allocations.paypal_transaction_id`; the `[MTC:<uid>]` note is also visible in `payments.transactions[].note`.
 7. ✅ (P0) Tool calling and `response_format: json_schema` together in one call — works on `muse-ember-1.0` and `muse-spark-1.3`.
-8. PayPal accepts an `invoice_date` in the past and a `DUE_ON_DATE_SPECIFIED` due date in the past (needed for the overdue demo invoice). Fallback: create with today's date and keep our dates as the truth (note on supplier screen).
-9. PayPal accepts recorded payments of a few cents (no minimum).
-10. PayPal honours `PayPal-Request-Id` on invoice create (same id twice → same invoice). Fallback: duplicate-number search & adopt (P1 D4).
-11. Error name returned for a duplicate `invoice_number` (expect `DUPLICATE_INVOICE_NUMBER`).
+8. ✅ (P1) Past `invoice_date` (D-48) and past `DUE_ON_DATE_SPECIFIED` due date (D-18) are kept as sent; status UNPAID. `PAYPAL_PAST_DATES_OK` stays true (D22 fallback not needed).
+9. ✅ (P1) A $0.05 recorded payment is accepted (no minimum).
+10. ❌ (P1) PayPal does **not** honour `PayPal-Request-Id` on invoice create: a repeat fails as a duplicate number. Resume = search by `invoice_number` and adopt (P1 D4) — required, not optional.
+11. ✅ (P1) Duplicate `invoice_number` → HTTP 422, `name` = `UNPROCESSABLE_ENTITY`, **`details[].issue` = `DUPLICATE_INVOICE_NUMBER`** — match on the issue, never the name.
 
-Checks 1, 6, 8, 9, 10, 11 run in P1 step 7 (`python -m scripts.sandbox.p1_open_checks`).
+Checks 1, 6, 8, 9, 10, 11 answered on 2026-11-09 by `python -m scripts.sandbox.p1_open_checks` (re-runnable; also R6: create with `Prefer: return=representation` returns the full invoice and send returns the payer link → 2 calls per invoice; R12: a reused send Request-Id did not replay a failure).
