@@ -13,6 +13,8 @@ envVarGroups:
         value: https://api-m.sandbox.paypal.com
       - key: DEMO_MODE
         value: "true"
+      - key: SUPPLIER_NAME # shown on PayPal invoices and the statement (P1 D1)
+        value: Demo Diamond Co.
       - key: LLM_MODEL # Meta Model API; never a -contributor model
         value: muse-ember-1.0
       - key: LLM_REASONING_EFFORT

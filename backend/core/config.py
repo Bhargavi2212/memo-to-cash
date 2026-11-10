@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     paypal_client_secret: SecretStr | None = None
     paypal_business_email: str | None = None
     paypal_webhook_id: str | None = None
+    supplier_name: str = "Demo Diamond Co."  # one supplier per deployment (P1 D1)
+    paypal_past_dates_ok: bool = True  # open check 8 fallback (P1 D22)
     llm_api_key: SecretStr | None = None
     llm_model: str = "muse-ember-1.0"  # Meta Model API; backup muse-spark-1.3 (P4 eval decides)
     llm_reasoning_effort: str = "low"
