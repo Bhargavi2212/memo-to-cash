@@ -84,7 +84,8 @@ npm install
 
 ## 4b. Sponsor tool: APIMatic Context Plugin for PayPal
 - Installed in Claude Code (see `docs/phases/P0.md §2`). **Use it whenever you write or change a PayPal call** (invoices, orders, webhooks): pull the endpoint/field details from it instead of guessing. Facts in §4 (proved in our sandbox) still win if the two disagree — note any disagreement in `PROJECT.md`.
-- Mention it in commit messages that touch PayPal code (`feat(p1): mirror invoices (FR-2) [apimatic]`).
+- **Coverage:** ContextMatic's PayPal context is the PayPal Server SDK (Orders, Payments, Vault, Transaction Search, Subscriptions) — **no Invoicing v2**. Invoicing calls are built from §4 sandbox facts + PayPal's docs, without the `[apimatic]` tag (P1 D23). It told us `PayPal-Request-Id` is kept only 6 h → recovery relies on the `[MTC:<uid>]` token and capture-id checks (TRD §6b-5).
+- Mention it in commit messages that touch PayPal code it covered (`feat(p1): mirror invoices (FR-2) [apimatic]`).
 - **Proof is required for the sponsor claim** (APIMatic's form asks for a repo link that *shows* plugin usage): after each PayPal call you build or change, add a row to `docs/APIMATIC.md` (what was asked, what it returned, file + commit) in the same commit. Ask Bhargavi to take a screenshot of one plugin lookup in P1 → `docs/img/apimatic-1.png`.
 
 ## 5. AI agent rules

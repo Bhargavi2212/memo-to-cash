@@ -96,6 +96,9 @@ Allocation in `RECORDING` for > 5 min, or before any retry of a record call: GET
 ## 6b-4. The sweep (all pending work, one function)
 A single function `services/sync.py::sweep(scope)` processes: unprocessed webhook events, `CREATED` payments > 2 min, `RECORDING`/`FAILED` allocations. It runs (a) at the end of every webhook request (that invoice/order only), (b) in the **Render background worker** (`backend/worker.py`, from P3): a loop every **30 s** over all rows, plus the once-a-day reminder drafting (J7) at 09:00 America/New_York. Page loads never run it. The admin "sync" button calls the same function.
 
+## 6b-5. `PayPal-Request-Id` only protects for 6 hours
+PayPal keeps a `PayPal-Request-Id` for **6 hours** on create-order and capture (APIMatic ContextMatic lookup, P1 — `docs/APIMATIC.md`; extendable to 72 h only via a PayPal account manager). Assume the same or shorter for Invoicing calls (open check 10 tests only an immediate repeat). The sweep can retry later than that, so after 6 h a reused Request-Id **no longer prevents a duplicate**. Recovery therefore never relies on it: before any retry, record-payment first searches the invoice for the exact `[MTC:<allocation uid>]` note token (§6b-3), and capture first checks our payment state, the order status (GET) and the unique `paypal_capture_id` (§6b-2). Request-Id stays on every write as the first, short-window guard only.
+
 ## 6c. Out of scope v1 (explicit)
 Refund/reversal handling of statement payments (shown, not automated), our own email sending, tax/shipping, multi-currency, real ERP connectors, multiple suppliers per account.
 
