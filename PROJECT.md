@@ -53,17 +53,18 @@ memo-to-cash/
 │   ├── page.tsx                    P0 shell → P2 "Start the demo"/"Start again" wired → P5 polish
 │   ├── api/[...path]/route.ts      P0 runtime proxy: /api/* → api service (private network)
 │   ├── layout.tsx · globals.css    P0
-│   ├── s/[token]/page.tsx          P2 buyer statement
+│   ├── s/[token]/layout.tsx · page.tsx   P2 buyer statement (noindex; client part in <Suspense>)
 │   ├── s/[token]/receipt/[paymentId]/page.tsx   P2
 │   └── supplier/
 │       ├── page.tsx                P3 overview
 │       ├── buyers/[id]/page.tsx    P3 buyer detail (copy link, record payment)
 │       ├── payments/[id]/page.tsx  P3 payment detail
 │       └── import/page.tsx         P3 ERP upload (admin only)
-├── components/                     P2–P3 PayPanel · AskBox · MemoGroup · InvoiceList · StatusChip · Receipt · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
+├── components/                     P2 Statement · PayPanel · MemoGroup · InvoiceList · StatusChip · Notices · DemoLogin · Receipt · StartDemo — P3–P4 AskBox · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
 ├── lib/
 │   ├── api.ts                      P2 typed API client
 │   ├── money.ts                    P2 the only money formatter
+│   ├── dates.ts                    P2 New York "today" + relative days for buyer screens
 │   ├── paypal.ts                   P2 tiny PayPal JS SDK loader (URL from /api/config, no extra dependency)
 │   └── money.test.ts               P2 `npm test` (node --test, Node 22 in CI)
 │
