@@ -181,6 +181,11 @@ class Payment(Base):
     reference: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     unapplied_cents: Mapped[int] = mapped_column(server_default="0", default=0)
+    capture_attempts: Mapped[int] = mapped_column(Integer, server_default="0", default=0)  # R2
+    created_at: Mapped[datetime] = _now()  # R5: notices + sweep age
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )  # R5: moves on every change made through the ORM
 
 
 class Allocation(Base):
