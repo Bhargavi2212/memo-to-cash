@@ -109,3 +109,5 @@ Results → PROJECT.md decisions + TRD §9 in the step 14 commit (12/13 already 
 | # | What happened | Decision |
 |---|---|---|
 | B0 | Plan approved by Bhargavi with 5 fixes: G2 (only `.ts` tests on Node 22, build on Node 20), step 5 payer-action link fallback, step 10 guest-card text + "Check again", step 13 open PR and stop until "merge", §1 step numbers. | Written into this plan before Stage 4. |
+| B1 | Step 4: ContextMatic `ask` errored twice on capture issue names; `model_search` gave statuses, models and `ErrorDetails.issue`. ContextMatic marks `application_context` deprecated. | Issue names from PayPal's Orders error docs, verified live (INSTRUMENT_DECLINED seen); `application_context` only on the card path. |
+| B2 | Step 5 smoke (PayPal login): order `PAYER_ACTION_REQUIRED` + `payer-action` link only; approval spun (no `return_url`) but the order was APPROVED; capture COMPLETED; INV-1038 $0 / INV-1042 $2,000 due on PayPal = ours; mocked decline not replayed for the same key. Items not shown on PayPal's new checkout page. | Checks 12 ✅, 13 ◐ — docs and video claim changed (TRD §9, P2 §0, UI_UX, APP_FLOW). |

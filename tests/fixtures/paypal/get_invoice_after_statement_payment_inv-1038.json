@@ -1,0 +1,138 @@
+{
+  "amount": {
+    "breakdown": {
+      "discount": {
+        "invoice_discount": {
+          "amount": {
+            "currency_code": "USD",
+            "value": "0.00"
+          }
+        },
+        "item_discount": {
+          "currency_code": "USD",
+          "value": "0.00"
+        }
+      },
+      "item_total": {
+        "currency_code": "USD",
+        "value": "3500.00"
+      },
+      "tax_total": {
+        "currency_code": "USD",
+        "value": "0.00"
+      }
+    },
+    "currency_code": "USD",
+    "value": "3500.00"
+  },
+  "configuration": {
+    "allow_only_pay_by_bank": false,
+    "allow_tip": false,
+    "allow_vba_payments": false,
+    "partial_payment": {
+      "allow_partial_payment": true,
+      "minimum_amount_due": {
+        "currency_code": "USD",
+        "value": "1.00"
+      }
+    },
+    "save_item_for_future": true,
+    "tax_calculated_after_discount": false,
+    "tax_inclusive": false,
+    "template_id": "TEMP-6SA13879W6583252W"
+  },
+  "detail": {
+    "archived": false,
+    "category_code": "SHIPPABLE",
+    "currency_code": "USD",
+    "group_draft": false,
+    "invoice_date": "2026-09-23",
+    "invoice_number": "INV-1038-mtf54l",
+    "memo": "Kept from memo M-201 \u00b7 ERP INV-1038",
+    "metadata": {
+      "caller_type": "API_V2_INVOICE",
+      "create_time": "2026-11-10T11:36:23Z",
+      "created_by_flow": "REGULAR_SINGLE",
+      "invoicer_view_url": "https://www.sandbox.paypal.com/invoice/details/INV2-MAHZ-M8F5-NCBE-32BK",
+      "last_update_time": "2026-11-10T11:48:04Z",
+      "recipient_view_url": "https://www.sandbox.paypal.com/invoice/p/REDACTED",
+      "spam_info": {}
+    },
+    "note": "See everything you owe and pay several invoices at once: http://localhost:3000/s/gMGt000yWegEGzBLikzLsDxSRvhxDLRymWOj3vYebzA",
+    "payment_term": {
+      "due_date": "2026-10-23",
+      "term_type": "DUE_ON_DATE_SPECIFIED"
+    },
+    "reference": "M-201",
+    "viewed_by_recipient": false
+  },
+  "due_amount": {
+    "currency_code": "USD",
+    "value": "0.00"
+  },
+  "id": "INV2-MAHZ-M8F5-NCBE-32BK",
+  "invoicer": {
+    "business_name": "Demo Diamond Co.",
+    "email_address": "supplier@example.com"
+  },
+  "items": [
+    {
+      "description": "SKU S-101 \u00b7 memo M-201",
+      "id": "ITEM-0CR98946YW881441F",
+      "name": "S-101 Round 1.01ct (memo M-201)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "2350.00"
+      }
+    },
+    {
+      "description": "SKU S-104 \u00b7 memo M-201",
+      "id": "ITEM-75454082856841038",
+      "name": "S-104 Stud pair (memo M-201)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "1150.00"
+      }
+    }
+  ],
+  "links": [
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-MAHZ-M8F5-NCBE-32BK",
+      "method": "GET",
+      "rel": "self"
+    }
+  ],
+  "payments": {
+    "paid_amount": {
+      "currency_code": "USD",
+      "value": "3500.00"
+    },
+    "transactions": [
+      {
+        "amount": {
+          "currency_code": "USD",
+          "value": "3500.00"
+        },
+        "method": "PAYPAL",
+        "note": "[MTC:42dd4709-fb0d-4962-8e0f-bdda090b68aa] Statement payment \u00b7 PayPal capture 9V339793VN420763H",
+        "payment_date": "2026-11-10",
+        "payment_date_time": "2026-11-10T00:00:00Z",
+        "payment_id": "EXTR-4H302840XD460182A",
+        "type": "EXTERNAL"
+      }
+    ]
+  },
+  "primary_recipients": [
+    {
+      "billing_info": {
+        "business_name": "Northside Jewelers",
+        "email_address": "buyer@example.com"
+      }
+    }
+  ],
+  "settings": {},
+  "status": "MARKED_AS_PAID",
+  "unilateral": false
+}

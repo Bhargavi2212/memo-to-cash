@@ -1,0 +1,11 @@
+{
+  "debug_id": "REDACTED",
+  "details": [
+    {
+      "description": "The instrument presented  was either declined by the processor or bank, or it can't be used for this payment.",
+      "issue": "INSTRUMENT_DECLINED"
+    }
+  ],
+  "message": "The requested action could not be performed, semantically incorrect, or failed business validation.",
+  "name": "UNPROCESSABLE_ENTITY"
+}
