@@ -106,7 +106,7 @@ memo-to-cash/
 |---|---|---|
 | Research + docs | ✅ done | Nov 8–9 |
 | P0 Skeleton live | ✅ done | Nov 9: web + api live on Render (`0.5c-512mb`, virginia), Neon prod migrated to 0001, CI green, deep health all true (`muse-ember-1.0`, 1.6 s) |
-| P1 Data + PayPal mirror | ✅ done (2 items open) | Nov 9: all tables (0002 on dev/test/prod), CSV importer, PayPal client + invoices + mirror, `/api/demo/start` live — **2.05 s / 1.45 s on Render**; open checks 1/6/8/9/11 ✅, 10 ❌ (search & adopt); 206 tests, CI with Postgres. Open: sandbox screenshot `docs/img/paypal-invoice-1.png`, APIMatic claim form (Bhargavi) |
+| P1 Data + PayPal mirror | ✅ done (APIMatic claim deferred to P2) | Nov 9: all tables (0002 on dev/test/prod), CSV importer, PayPal client + invoices + mirror, `/api/demo/start` live — **2.05 s / 1.45 s on Render**; open checks 1/6/8/9/11 ✅, 10 ❌ (search & adopt); 205 tests, CI with Postgres. Sandbox invoice screenshot `docs/img/paypal-invoice-1.png` (statement token blacked out). Open: APIMatic screenshot + claim form (after P2, Bhargavi) |
 | P2 Statement + one payment for many invoices | ⬜ | |
 | P3 Supplier side + webhooks | ⬜ | |
 | P4 Agent + eval | ⬜ | |
