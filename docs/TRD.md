@@ -115,7 +115,7 @@ Refund/reversal handling of statement payments (shown, not automated), our own e
 
 ## 9. Open checks (do in P1–P3)
 1. ✅ (P1) PUT adjustment on a PARTIALLY_PAID invoice works (strip rule; `?send_to_recipient=false&send_to_invoicer=false`; PUT answers with a link → GET for the new due).
-2. Venmo button renders in sandbox; whether a sandbox Venmo payment can complete.
+2. ◐ (P2, Nov 10) **Venmo button renders** in the sandbox (with `buyer-country=US`, `enable-funding=venmo,paylater`), next to PayPal, Pay Later and Debit or Credit Card. Whether a sandbox Venmo payment can complete (needs the Venmo app) — not tried; README limits.
 3. Webhook delivery to the Render URL; signature verification.
 4. LLM tool-calling latency acceptable for the ask box (< 8 s) on real statements (P4 eval). P0: 1.2–1.8 s for tool call + answer on a tiny case.
 5. ✅ (P0) LLM key + model id: Meta Model API key works at `api.meta.ai/v1`; `muse-ember-1.0` available. (The old Llama API `api.llama.com` rejects Model API keys.) Deep health on Render re-confirms after deploy.
