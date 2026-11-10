@@ -58,3 +58,8 @@ jobs:
       - run: npx next typegen # generates next-env.d.ts + route types (git-ignored)
       - run: npx tsc --noEmit
       - run: npm run lint
+      - run: npm run build # same Node 20 as Render (P2 R6)
+      - uses: actions/setup-node@v4 # TS unit tests need Node 22's type stripping (P2 plan G2)
+        with:
+          node-version: "22"
+      - run: npm test

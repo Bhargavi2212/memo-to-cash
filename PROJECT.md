@@ -64,7 +64,8 @@ memo-to-cash/
 ├── lib/
 │   ├── api.ts                      P2 typed API client
 │   ├── money.ts                    P2 the only money formatter
-│   └── paypal.ts                   P2 tiny PayPal JS SDK loader (URL from /api/config, no extra dependency)
+│   ├── paypal.ts                   P2 tiny PayPal JS SDK loader (URL from /api/config, no extra dependency)
+│   └── money.test.ts               P2 `npm test` (node --test, Node 22 in CI)
 │
 ├── backend/
 │   ├── main.py                     P0 FastAPI app (uvicorn) — Render api service
