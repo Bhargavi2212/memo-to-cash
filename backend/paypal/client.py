@@ -157,6 +157,11 @@ class PayPal:
             debug_id,
         )
 
+    async def ensure_token(self) -> None:
+        """Fetch/cache the OAuth token now — capture calls this BEFORE taking the buyer lock,
+        so the lock is never held while PayPal hands out a token (P2 R7)."""
+        await _ensure(self)
+
     async def request(
         self,
         method: str,
@@ -165,9 +170,16 @@ class PayPal:
         json: Any = None,
         request_id: str | None = None,
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+        retries: int | None = None,
     ) -> Any:
-        """Call PayPal and return the JSON body ({} when empty). Raises PayPalError."""
+        """Call PayPal and return the JSON body ({} when empty). Raises PayPalError.
+
+        `timeout` (seconds, whole call) and `retries` override the defaults — capture uses
+        10 s and no retries because it runs under the buyer lock (P2 D10, R7)."""
         method = method.upper()
+        call_timeout = timeout if timeout is not None else TIMEOUT_S
+        max_retries = len(BACKOFF_S) if retries is None else min(retries, len(BACKOFF_S))
         if method in WRITE_METHODS and not request_id:
             raise ValueError("every PayPal write needs a PayPal-Request-Id (invariant 4)")
         async with self._client() as http:
@@ -181,11 +193,13 @@ class PayPal:
                 hdrs.update(headers or {})
                 start = _now()
                 try:
-                    resp = await http.request(method, path, json=json, headers=hdrs)
+                    resp = await http.request(
+                        method, path, json=json, headers=hdrs, timeout=httpx.Timeout(call_timeout)
+                    )
                 except httpx.TimeoutException:
-                    log.warning("paypal %s %s -> timeout after %.0f s", method, path, TIMEOUT_S)
+                    log.warning("paypal %s %s -> timeout after %.0f s", method, path, call_timeout)
                     failure = PayPalError(
-                        "TIMEOUT", f"no answer in {TIMEOUT_S:.0f} s", None, [], None, True
+                        "TIMEOUT", f"no answer in {call_timeout:.0f} s", None, [], None, True
                     )
                 except httpx.TransportError as e:  # connection refused, DNS, reset: transient
                     log.warning("paypal %s %s -> network error %s", method, path, type(e).__name__)
@@ -199,7 +213,7 @@ class PayPal:
                     if resp.status_code < 400:
                         return resp.json() if resp.content else {}
                     failure = _error(resp)
-                if not failure.transient or attempt >= len(BACKOFF_S):
+                if not failure.transient or attempt >= max_retries:
                     if failure.status is not None and failure.status >= 400:
                         log.warning(
                             "paypal %s %s failed: %s debug_id=%s",
@@ -211,6 +225,11 @@ class PayPal:
                     raise failure
                 await _sleep(BACKOFF_S[attempt])
                 attempt += 1
+
+
+async def _ensure(pp: "PayPal") -> None:
+    async with pp._client() as http:
+        await pp._token(http)
 
 
 def get_paypal() -> PayPal:
