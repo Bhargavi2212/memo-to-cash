@@ -16,7 +16,10 @@ APP_ENVS = ("dev", "prod", "test")
 
 class Settings(BaseSettings):
     # extra="ignore": local .env also holds keys only the frontend uses (NEXT_PUBLIC_*).
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # hide_input_in_errors: a validation error must never echo .env values (secrets) to logs.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     # Required at startup (P0)
     paypal_base_url: str

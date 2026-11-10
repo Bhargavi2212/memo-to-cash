@@ -71,6 +71,14 @@ def test_secrets_hidden_in_repr(env):
     assert s.admin_token.get_secret_value() == "super-secret-admin"
 
 
+def test_validation_error_hides_secret_inputs(env):
+    env.delenv("DATABASE_URL")
+    env.setenv("LLM_API_KEY", "super-secret-llm")
+    with pytest.raises(ValidationError) as exc:
+        load_settings(_env_file=None)
+    assert "super-secret" not in str(exc.value)
+
+
 def test_importing_app_config_with_live_url_fails_to_start():
     env = {**os.environ, **REQUIRED, "PAYPAL_BASE_URL": "https://api-m.paypal.com"}
     r = subprocess.run(
