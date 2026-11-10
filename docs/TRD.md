@@ -9,7 +9,7 @@ Status: v1 (Nov 9, 2026). Read with `PRD.md`, `APP_FLOW.md`, `BACKEND_SCHEMA.md`
 | Payments UI | PayPal JS SDK (`components=buttons`, `enable-funding=venmo,paylater`) | Official buttons for PayPal, Venmo, Pay Later |
 | Backend | Python 3.12, FastAPI (`backend/main.py`, uvicorn) — Render web service; plus a Render **background worker** (`backend/worker.py`, P3) | Money logic in Python; always-on server, real background jobs |
 | DB | Neon Postgres (neon.tech; branches `main`=prod, `dev`, `test`), SQLAlchemy 2 + Alembic | Free, doesn't expire before judging, branches for dev/test |
-| AI | Meta Llama API, `Llama-4-Maverick-17B-128E-Instruct-FP8`, base `https://api.llama.com/compat/v1/` (OpenAI client) | JSON-schema output + tool calling |
+| AI | Meta Model API, `muse-ember-1.0` (reasoning effort `low`), base `https://api.meta.ai/v1` (OpenAI client); backup `muse-spark-1.3`; final model chosen by the P4 eval | JSON-schema output + tool calling; ~1.1 s per call in the P0 test |
 | Hosting | **Render** (sponsor) via `render.yaml` Blueprint: web + api (+ worker from P3), Starter plan | Always on (no sleep), paid by hackathon credits through Dec 15; eligible for Render's sponsor prize |
 | Dev tooling | **APIMatic Context Plugin for PayPal** in Claude Code (sponsor tool) | PayPal API context while building; qualifies for the APIMatic sponsor prize |
 | CI | GitHub Actions: pytest, ruff, `tsc --noEmit`, eslint | Green before every deploy |
@@ -67,8 +67,9 @@ Known limits: one invoice per PayPal invoice page; recorded payments show `MARKE
 
 ## 6. AI spec
 **Principle:** the model reads and proposes; deterministic code validates; the supplier decides.
-- Client: OpenAI SDK pointed at Llama compat base; `temperature 0.1`; `response_format: {type: json_schema}`; timeout 8 s; 1 retry.
-- **Tool calling + JSON schema in one call is unconfirmed on Llama.** Default pattern: (1) tool loop without `response_format` to gather records, (2) one final call with `response_format: json_schema` and no tools. Collapse to one call only if open check 7 passes.
+- Client: OpenAI SDK pointed at `https://api.meta.ai/v1`; model `LLM_MODEL` (default `muse-ember-1.0`), `reasoning_effort` = `LLM_REASONING_EFFORT` (default `low`); `temperature 0.1`; `response_format: {type: json_schema}`; timeout 8 s; 1 retry. Never a `-contributor` model.
+- Muse models reason before answering. A reply cut off by the token limit (`finish_reason="length"`) or not valid JSON is a failure → safe fallback + proposal, never a partial answer.
+- **Tool calling + JSON schema in one call works** (open check 7, P0: 3/3 runs on `muse-ember-1.0` and `muse-spark-1.3`). Tool loop and final answer use the same call shape: `tools` + `response_format: json_schema`.
 - **Job A — Answer (FR-8):** tools `get_statement`, `find_memo_line(sku)`, `get_return_record(sku)`, `get_invoice(no)` (all scoped to the token's buyer). Output `AnswerResult` (see schema doc). Validator: cited ids exist + belong to buyer; every money figure in `answer` must be in the **allowed set** = record values ∪ totals computed by code (buyer owed, each invoice's due/paid/total, each memo's kept/returned/out sums); else fallback "I'll ask the supplier" + proposal.
 - **Job B — Triage (FR-9):** output `TriageResult` (label ∈ QUESTION, RETURN_CLAIM, DEDUCTION_REQUEST, PAYMENT_PROMISE, DISPUTE, OTHER; fields sku, amount_cents, date, invoice_no, reason). Validator: SKU on buyer's memos; deduction ≤ line price **and** ≤ invoice due (`BACKEND_SCHEMA.md §8`); return claim compared to records → evidence `MATCH | NO_RECORD | ALREADY_CREDITED`.
 - **Job C — Reminder draft:** output `ReminderDraft {text, send_after}`; supplier approval required; 2/day enforced in code.
@@ -99,7 +100,7 @@ A single function `services/sync.py::sweep(scope)` processes: unprocessed webhoo
 Refund/reversal handling of statement payments (shown, not automated), our own email sending, tax/shipping, multi-currency, real ERP connectors, multiple suppliers per account.
 
 ## 7. Configuration
-`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_BASE_URL` (sandbox only), `PAYPAL_WEBHOOK_ID`, `PAYPAL_BUSINESS_EMAIL`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `LLM_API_KEY`, `LLM_MODEL`, `DATABASE_URL` (Neon **pooled** connection string, used by the app), `DATABASE_URL_UNPOOLED` (direct, used only by Alembic migrations), `TEST_DATABASE_URL` (integration tests only: Neon `test` branch locally, Postgres service in CI), `ADMIN_TOKEN`, `DEMO_MODE=true`, `DEMO_COOKIE_SECRET`, `SANDBOX_BUYER_EMAIL` and `SANDBOX_BUYER_PASSWORD` (the sandbox **personal** account — every demo buyer uses this email so it can pay; both shown on the demo page; sandbox only), `IP_HASH_SECRET` (for `demo_rate` IP hashing), `APP_ENV` (`dev`|`prod`|`test`, prefixes PayPal-Request-Id keys), `APP_BASE_URL` (the **web** address; no fallback), `API_PUBLIC_URL` (the api's public address, for the PayPal webhook), `API_INTERNAL_HOSTPORT` (web service only, from Render `hostport`; optional override `API_INTERNAL_BASE`).
+`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_BASE_URL` (sandbox only), `PAYPAL_WEBHOOK_ID`, `PAYPAL_BUSINESS_EMAIL`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_REASONING_EFFORT`, `DATABASE_URL` (Neon **pooled** connection string, used by the app), `DATABASE_URL_UNPOOLED` (direct, used only by Alembic migrations), `TEST_DATABASE_URL` (integration tests only: Neon `test` branch locally, Postgres service in CI), `ADMIN_TOKEN`, `DEMO_MODE=true`, `DEMO_COOKIE_SECRET`, `SANDBOX_BUYER_EMAIL` and `SANDBOX_BUYER_PASSWORD` (the sandbox **personal** account — every demo buyer uses this email so it can pay; both shown on the demo page; sandbox only), `IP_HASH_SECRET` (for `demo_rate` IP hashing), `APP_ENV` (`dev`|`prod`|`test`, prefixes PayPal-Request-Id keys), `APP_BASE_URL` (the **web** address; no fallback), `API_PUBLIC_URL` (the api's public address, for the PayPal webhook), `API_INTERNAL_HOSTPORT` (web service only, from Render `hostport`; optional override `API_INTERNAL_BASE`).
 
 **Render setup:** `render.yaml` Blueprint defines the services (api: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`; web: `npm start` with the runtime proxy route forwarding `/api/*` to `http://$API_INTERNAL_HOSTPORT`; worker from P3: `python -m backend.worker`), plan Starter, shared env group for non-secret values only; secrets declared per service with `sync: false` (not allowed in env groups). Python deps in `requirements.txt`. Alembic migrations are run by hand against Neon (dev, then prod at merge), never in the build. PayPal JS SDK loads with `buyer-country=US` in sandbox so the Venmo button can render. Register the webhook URL **on the api service directly** (`<API_PUBLIC_URL>/api/paypal/webhook`, not through the web proxy, so PayPal's signature headers and raw body arrive untouched) in the PayPal developer dashboard for the sandbox app and copy its id to `PAYPAL_WEBHOOK_ID`.
 
@@ -113,9 +114,9 @@ Refund/reversal handling of statement payments (shown, not automated), our own e
 1. PUT adjustment on a PARTIALLY_PAID invoice.
 2. Venmo button renders in sandbox; whether a sandbox Venmo payment can complete.
 3. Webhook delivery to the Render URL; signature verification.
-4. Llama tool-calling latency acceptable for the ask box (< 8 s).
-5. The Llama key works from Render (P0 deep health), and the exact model id is available on the account.
+4. LLM tool-calling latency acceptable for the ask box (< 8 s) on real statements (P4 eval). P0: 1.2–1.8 s for tool call + answer on a tiny case.
+5. ✅ (P0) LLM key + model id: Meta Model API key works at `api.meta.ai/v1`; `muse-ember-1.0` available. (The old Llama API `api.llama.com` rejects Model API keys.) Deep health on Render re-confirms after deploy.
 6. Record-payment response returns a PayPal transaction id (dedupe still works via the `[MTC:<uid>]` note token if not).
-7. Llama: tool calling and `response_format: json_schema` together in one call.
+7. ✅ (P0) Tool calling and `response_format: json_schema` together in one call — works on `muse-ember-1.0` and `muse-spark-1.3`.
 8. PayPal accepts an `invoice_date` in the past and a `DUE_ON_DATE_SPECIFIED` due date in the past (needed for the overdue demo invoice). Fallback: create with today's date and keep our dates as the truth (note on supplier screen).
 9. PayPal accepts recorded payments of a few cents (no minimum).

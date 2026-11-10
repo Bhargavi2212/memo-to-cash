@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* Design tokens — docs/UI_UX.md §3. Calm ledger look: one accent, tabular numbers. */
+@theme {
+  --color-ink: #111827;
+  --color-muted: #6b7280;
+  --color-line: #e5e7eb;
+  --color-surface: #ffffff;
+  --color-canvas: #f9fafb;
+  --color-accent: #1d4ed8;
+  --color-success: #047857;
+  --color-warning: #b45309;
+  --color-danger: #b91c1c;
+
+  --radius-card: 8px;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Money and other figures line up in columns. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

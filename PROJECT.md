@@ -3,7 +3,7 @@
 **Start here.** This is the map. Details live in `docs/`. Claude Code reads this first, then `CLAUDE.md`.
 
 ## What
-Buyers who take goods **on memo** (consignment) get **one statement link** that shows what they kept, what they returned (credited) and what they owe — and they **pay many PayPal invoices in one payment**. An AI agent (Meta Llama) explains the bill from the records and turns buyer messages into proposals the supplier approves.
+Buyers who take goods **on memo** (consignment) get **one statement link** that shows what they kept, what they returned (credited) and what they owe — and they **pay many PayPal invoices in one payment**. An AI agent (Meta Model API, Muse) explains the bill from the records and turns buyer messages into proposals the supplier approves.
 
 ## Why
 - Memo is normal trade: 39% of US jewelers' store merchandise is memo inventory; goods sit 1–3 months.
@@ -20,7 +20,7 @@ Buyers who take goods **on memo** (consignment) get **one statement link** that 
 ERP export → mirror invoices as **real PayPal invoices** → buyer **statement link** → **one PayPal checkout** (PayPal, Pay Later, Venmo, bank) → **split** across invoices → **recorded on each PayPal invoice** → webhooks keep it in sync → **agent** answers questions + turns messages into **proposals** → supplier approves → PayPal invoice updated / PayPal reminder sent.
 
 ## Stack
-Next.js + Python FastAPI + background worker on **Render** (sponsor) · Neon Postgres · APIMatic Context Plugin for PayPal (build tooling, sponsor) · PayPal Invoicing v2, Orders v2, JS SDK, Webhooks (sandbox) · Meta Llama API (Llama 4 Maverick, JSON-schema output, tool calling).
+Next.js + Python FastAPI + background worker on **Render** (sponsor) · Neon Postgres · APIMatic Context Plugin for PayPal (build tooling, sponsor) · PayPal Invoicing v2, Orders v2, JS SDK, Webhooks (sandbox) · Meta Model API (`muse-ember-1.0`, JSON-schema output, tool calling).
 
 ## File structure
 ✅ = exists now · everything else is created in the phase shown. Update this tree when you add/move files (same commit).
@@ -40,10 +40,10 @@ memo-to-cash/
 │   └── phases/                     ✅ P0.md (spec) · P0-plan.md (build plan + gaps) — one spec per phase, written before it starts
 ├── scripts/                        __init__.py (P0)
 │   ├── sandbox/                    ✅ statement_test.ps1 · statement_test_v2.ps1 (manual PayPal experiments)
-│   ├── llama_smoke.py              P0 Llama key + model check (prints ok/model/ms only)
+│   ├── llm_smoke.py                P0 LLM key + model check (prints ok/model/ms only)
 │   └── sandbox_smoke.py            P5 end-to-end run against the real sandbox
 │
-├── package.json · next.config.ts · tsconfig.json · postcss.config.mjs · eslint.config.mjs · next-env.d.ts   P0 (Tailwind v4: tokens in app/globals.css, no tailwind.config)
+├── package.json · next.config.ts · tsconfig.json · eslint.config.mjs · AGENTS.md   P0 (Next 16.4; Tailwind v4 via Turbopack CSS loader, tokens in app/globals.css; next-env.d.ts generated, git-ignored)
 ├── render.yaml                     P0 Render Blueprint (web + api, Starter) · P3 adds the worker
 ├── requirements.txt · requirements-dev.txt · pyproject.toml (ruff, pytest)  P0
 ├── alembic.ini                     P0 (migrations use DATABASE_URL_UNPOOLED)
@@ -110,9 +110,11 @@ memo-to-cash/
 | P4 Agent + eval | ⬜ | |
 | P5 Ship + submit | ⬜ | Target Wed Nov 11, 11pm ET |
 
-Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Render · 4 Llama latency · 5 Llama key + model id · 6 transaction id in record response · 7 tool calling + json_schema together · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
+Open checks (TRD §9): 1 PUT on PARTIALLY_PAID · 2 Venmo in sandbox · 3 webhook to Render · 4 LLM latency on real statements · ~~5 LLM key + model id~~ ✅ P0 · 6 transaction id in record response · ~~7 tool calling + json_schema together~~ ✅ P0 · 8 past invoice/due dates accepted · 9 tiny recorded amounts accepted.
 
 ## Decisions log (newest first — add one line per decision)
+- 2026-11-09 **LLM: Meta Model API instead of the Llama API.** New Meta developer keys (`LLM_…`) only work at `https://api.meta.ai/v1` (Muse models); `api.llama.com` returns 401. P0 test of all 7 chat models (json_schema, reasoning low): `muse-ember-1.0` ~1.1 s and correct, tool call + json_schema 3/3 in 1.2–1.8 s → default; `muse-spark-1.3` (3.6–5.4 s, correct) = backup; P4 eval decides. Never a `-contributor` model. `LLM_MODEL` + `LLM_REASONING_EFFORT` are settings; cut-off reply (`finish_reason=length`) or invalid JSON = fallback. Closes open checks 5 and 7.
+- 2026-11-09 Neon project `memo-to-cash` (`delicate-moon-76690980`, aws-us-east-1, Postgres 17), branches `main` (prod) / `dev` / `test`, created with the Neon CLI; `dev` migrated to 0001.
 - 2026-11-09 P0 plan review (`docs/phases/P0-plan.md` G1–G16): Neon AWS US East + Render `virginia`; `uvicorn` in `requirements.txt`; settings `extra="ignore"`; psycopg `prepare_threshold=None` behind Neon's pooler; OpenAPI under `/api`; proxy passes `X-Forwarded-For` unchanged and returns 502 `API_UNREACHABLE`; never set `NODE_ENV` on Render; Bhargavi opens PRs and runs production migrations.
 - 2026-11-09 Render details: `APP_ENV` = dev|prod|test; `APP_BASE_URL` explicit (web address, no fallback); `/api/*` forwarded by a runtime Next.js proxy route (no build-time env needed); PayPal webhook registered on the api's public URL; secrets per service (`sync: false` not allowed in env groups); Blueprint created after the P0 merge; rate limit uses first `X-Forwarded-For` IP.
 - 2026-11-09 **Switched hosting to Render** (sponsor): Blueprint `render.yaml`, Starter plan (no sleep), web (Next.js) + api (FastAPI) in P0, background worker in P3 (sweep every 30 s + daily reminders) — replaces page-load sweep and the cron endpoint. DB stays on Neon (Render free Postgres expires after 30 days). Sponsor prizes in play: APIMatic and Render (only one can be won).

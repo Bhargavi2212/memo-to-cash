@@ -9,7 +9,7 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 - [ ] Neon (prod = `main` branch; local = `dev`; tests = `test`); Alembic with an empty baseline (tables in P1)
 - [ ] `backend/core/config.py` (pydantic-settings, `.env`, sandbox guard; only `PAYPAL_BASE_URL`, `APP_ENV`, `DATABASE_URL` required)
 - [ ] `/api/health` → `{ok, sandbox, db, env}`; `/api/health/deep` (admin) → `{db, paypal_token, llm:{ok, model, ms}}`
-- [ ] Llama key + model id confirmed (`python -m scripts.llama_smoke`)
+- [ ] LLM key + model id confirmed (`python -m scripts.llm_smoke`)
 - [x] `CLAUDE.md`, `PROJECT.md`, `.claude/` already in the repo
 - [ ] GitHub Actions: ruff + pytest + `tsc --noEmit` + eslint
 **Done when:** every box in `docs/phases/P0.md §4` is ticked.
@@ -48,11 +48,11 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 **Done when:** paying one invoice on PayPal's page updates the statement; approving a deduction changes the PayPal invoice.
 
 ## Phase P4 — Agent + eval (Wed morning)
-- [ ] `agent/llm.py` (OpenAI client → Llama compat, timeout, usage caps)
+- [ ] `agent/llm.py` (OpenAI client → Meta Model API, timeout, reasoning effort, usage caps)
 - [ ] Job A answer (tools + validator), Job B triage (validator + proposal), Job C reminder draft
 - [ ] `eval/messages.jsonl` (30: real redacted first), `eval/baseline.py`, `eval/run_eval.py` (`python -m eval.run_eval`)
 - [ ] Prompt-injection cases in eval
-- [ ] **Open checks 4, 7:** Llama latency; tool calling + json_schema in one call
+- [ ] **Open check 4:** LLM latency on real statements; eval picks `muse-ember-1.0` vs backup `muse-spark-1.3` (7 closed in P0)
 **Tests:** validators (fake citations rejected, deduction > price rejected), fallback on timeout.
 **Done when:** eval table printed; unsafe-action rate 0; answers cite real records.
 
@@ -61,7 +61,7 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 - [ ] README: one section per judging criterion with evidence; limits & workarounds; run locally; tests & eval numbers; architecture diagram
 - [ ] Full sandbox smoke run on the production URL
 - [ ] Record video (script below), upload public YouTube
-- [ ] Devpost text, tools section (Meta Llama API; **APIMatic Context Plugin for PayPal** — how it was used, with commit examples), sponsor-tool field set to **APIMatic and Render**, README section on Render (Blueprint, services, worker), README section "Built with APIMatic Context Plugin" linking `docs/APIMATIC.md`, testing instructions
+- [ ] Devpost text, tools section (Meta Model API / Muse; **APIMatic Context Plugin for PayPal** — how it was used, with commit examples), sponsor-tool field set to **APIMatic and Render**, README section on Render (Blueprint, services, worker), README section "Built with APIMatic Context Plugin" linking `docs/APIMATIC.md`, testing instructions
 - [ ] Stage One checklist all ticked → **Submit**
 
 ### Stage One checklist

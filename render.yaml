@@ -1,0 +1,78 @@
+# Render Blueprint — docs/phases/P0.md step 7.
+# Create once after the P0 merge: Render → New → Blueprint → this repo.
+# Secrets are declared per service with `sync: false` (you type them in the dashboard;
+# Render doesn't allow sync:false inside env groups). The group holds non-secret values.
+# Never set NODE_ENV here: at build time it makes `npm ci` skip devDependencies.
+
+envVarGroups:
+  - name: mtc-shared
+    envVars:
+      - key: APP_ENV
+        value: prod
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: DEMO_MODE
+        value: "true"
+      - key: LLM_MODEL # Meta Model API; never a -contributor model
+        value: muse-ember-1.0
+      - key: LLM_REASONING_EFFORT
+        value: low
+      - key: APP_BASE_URL
+        value: https://memo-to-cash-web.onrender.com
+      - key: API_PUBLIC_URL
+        value: https://memo-to-cash-api.onrender.com
+
+services:
+  - type: web
+    name: memo-to-cash-api
+    runtime: python
+    plan: starter
+    region: virginia
+    branch: main
+    autoDeployTrigger: checksPass # deploy main only after GitHub CI is green
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - fromGroup: mtc-shared
+      - key: DATABASE_URL # Neon main branch, pooled
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_BUSINESS_EMAIL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: DEMO_COOKIE_SECRET
+        sync: false
+      - key: IP_HASH_SECRET
+        sync: false
+      - key: SANDBOX_BUYER_EMAIL
+        sync: false
+      - key: SANDBOX_BUYER_PASSWORD
+        sync: false
+
+  - type: web
+    name: memo-to-cash-web
+    runtime: node
+    plan: starter
+    region: virginia
+    branch: main
+    autoDeployTrigger: checksPass
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - fromGroup: mtc-shared
+      - key: API_INTERNAL_HOSTPORT # api's private address; the proxy route forwards /api/* here
+        fromService:
+          type: web
+          name: memo-to-cash-api
+          property: hostport
