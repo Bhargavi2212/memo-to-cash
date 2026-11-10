@@ -26,7 +26,7 @@ services:
   - type: web
     name: memo-to-cash-api
     runtime: python
-    plan: starter
+    plan: 0.5c-512mb # 0.5 CPU / 512 MB (formerly "Starter")
     region: virginia
     branch: main
     autoDeployTrigger: checksPass # deploy main only after GitHub CI is green
@@ -61,7 +61,7 @@ services:
   - type: web
     name: memo-to-cash-web
     runtime: node
-    plan: starter
+    plan: 0.5c-512mb # 0.5 CPU / 512 MB (formerly "Starter")
     region: virginia
     branch: main
     autoDeployTrigger: checksPass

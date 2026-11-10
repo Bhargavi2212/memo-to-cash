@@ -66,3 +66,4 @@ LLM smoke fails · web → api unreachable on Render (fallback `API_INTERNAL_BAS
 | B6 | Scaffold sample SVGs (incl. the Vercel logo) | Removed; `public/` is empty (not tracked) |
 | B7 | `sslmode=require` only when the URL doesn't set it and the host isn't local | Keeps P1's CI Postgres (no TLS) working |
 | B8 | Meta developer keys (`LLM_…`) are **Meta Model API** keys: `api.llama.com` → 401, `api.meta.ai/v1` works (Muse models only) | Switched to `muse-ember-1.0`, reasoning `low`, base `https://api.meta.ai/v1`; backup `muse-spark-1.3`; never `-contributor`; `llama_smoke.py` → `llm_smoke.py`; closes open checks 5 and 7 (decisions log) |
+| B9 | Render Blueprint flagged issues: plan ids are now compute ids (`starter` → `0.5c-512mb`) | `plan: 0.5c-512mb` on both services |
