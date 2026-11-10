@@ -1,0 +1,63 @@
+{
+  "id": "72194592T77141124",
+  "intent": "CAPTURE",
+  "links": [
+    {
+      "href": "https://api.sandbox.paypal.com/v2/checkout/orders/72194592T77141124",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "href": "https://www.sandbox.paypal.com/checkoutnow?token=72194592T77141124",
+      "method": "GET",
+      "rel": "payer-action"
+    }
+  ],
+  "payment_source": {
+    "paypal": {}
+  },
+  "purchase_units": [
+    {
+      "amount": {
+        "breakdown": {
+          "item_total": {
+            "currency_code": "USD",
+            "value": "5000.00"
+          }
+        },
+        "currency_code": "USD",
+        "value": "5000.00"
+      },
+      "custom_id": "b331260a-741c-4dbe-9169-cd1d67ecc5c7",
+      "description": "Statement payment \u00b7 Demo Diamond Co.",
+      "invoice_id": "dev-stmt-b331260a-741c-4dbe-9169-cd1d67ecc5c7",
+      "items": [
+        {
+          "name": "INV-1038 (memo M-201)",
+          "quantity": "1",
+          "unit_amount": {
+            "currency_code": "USD",
+            "value": "3500.00"
+          }
+        },
+        {
+          "name": "INV-1042 (memo M-207)",
+          "quantity": "1",
+          "unit_amount": {
+            "currency_code": "USD",
+            "value": "1500.00"
+          }
+        }
+      ],
+      "payee": {
+        "display_data": {
+          "brand_name": "Demo Diamond Co."
+        },
+        "email_address": "supplier@example.com",
+        "merchant_id": "LRVSJ55AST5XN"
+      },
+      "reference_id": "default"
+    }
+  ],
+  "status": "PAYER_ACTION_REQUIRED"
+}

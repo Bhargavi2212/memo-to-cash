@@ -1,0 +1,127 @@
+{
+  "create_time": "2026-11-10T11:48:03Z",
+  "id": "72194592T77141124",
+  "intent": "CAPTURE",
+  "links": [
+    {
+      "href": "https://api.sandbox.paypal.com/v2/checkout/orders/72194592T77141124",
+      "method": "GET",
+      "rel": "self"
+    }
+  ],
+  "payer": {
+    "address": {},
+    "email_address": "buyer@example.com",
+    "name": {},
+    "payer_id": "REDACTED"
+  },
+  "payment_source": {
+    "paypal": {
+      "account_id": "REDACTED",
+      "account_status": "VERIFIED",
+      "address": {},
+      "email_address": "buyer@example.com",
+      "name": {}
+    }
+  },
+  "purchase_units": [
+    {
+      "amount": {
+        "breakdown": {
+          "item_total": {
+            "currency_code": "USD",
+            "value": "5000.00"
+          }
+        },
+        "currency_code": "USD",
+        "value": "5000.00"
+      },
+      "custom_id": "b331260a-741c-4dbe-9169-cd1d67ecc5c7",
+      "description": "Statement payment \u00b7 Demo Diamond Co.",
+      "invoice_id": "dev-stmt-b331260a-741c-4dbe-9169-cd1d67ecc5c7",
+      "items": [
+        {
+          "name": "INV-1038 (memo M-201)",
+          "quantity": "1",
+          "unit_amount": {
+            "currency_code": "USD",
+            "value": "3500.00"
+          }
+        },
+        {
+          "name": "INV-1042 (memo M-207)",
+          "quantity": "1",
+          "unit_amount": {
+            "currency_code": "USD",
+            "value": "1500.00"
+          }
+        }
+      ],
+      "payee": {
+        "display_data": {
+          "brand_name": "Demo Diamond Co."
+        },
+        "email_address": "supplier@example.com",
+        "merchant_id": "LRVSJ55AST5XN"
+      },
+      "payments": {
+        "captures": [
+          {
+            "amount": {
+              "currency_code": "USD",
+              "value": "5000.00"
+            },
+            "create_time": "2026-11-10T11:48:03Z",
+            "custom_id": "b331260a-741c-4dbe-9169-cd1d67ecc5c7",
+            "final_capture": true,
+            "id": "9V339793VN420763H",
+            "invoice_id": "dev-stmt-b331260a-741c-4dbe-9169-cd1d67ecc5c7",
+            "links": [
+              {
+                "href": "https://api.sandbox.paypal.com/v2/payments/captures/9V339793VN420763H",
+                "method": "GET",
+                "rel": "self"
+              },
+              {
+                "href": "https://api.sandbox.paypal.com/v2/payments/captures/9V339793VN420763H/refund",
+                "method": "POST",
+                "rel": "refund"
+              },
+              {
+                "href": "https://api.sandbox.paypal.com/v2/checkout/orders/72194592T77141124",
+                "method": "GET",
+                "rel": "up"
+              }
+            ],
+            "seller_protection": {
+              "dispute_categories": [
+                "ITEM_NOT_RECEIVED",
+                "UNAUTHORIZED_TRANSACTION"
+              ],
+              "status": "ELIGIBLE"
+            },
+            "seller_receivable_breakdown": {
+              "gross_amount": {
+                "currency_code": "USD",
+                "value": "5000.00"
+              },
+              "net_amount": {
+                "currency_code": "USD",
+                "value": "4825.01"
+              },
+              "paypal_fee": {
+                "currency_code": "USD",
+                "value": "174.99"
+              }
+            },
+            "status": "COMPLETED",
+            "update_time": "2026-11-10T11:48:03Z"
+          }
+        ]
+      },
+      "reference_id": "default"
+    }
+  ],
+  "status": "COMPLETED",
+  "update_time": "2026-11-10T11:48:03Z"
+}

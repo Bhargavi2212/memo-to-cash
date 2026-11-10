@@ -53,27 +53,29 @@ memo-to-cash/
 │   ├── page.tsx                    P0 shell → P2 "Start the demo"/"Start again" wired → P5 polish
 │   ├── api/[...path]/route.ts      P0 runtime proxy: /api/* → api service (private network)
 │   ├── layout.tsx · globals.css    P0
-│   ├── s/[token]/page.tsx          P2 buyer statement
+│   ├── s/[token]/layout.tsx · page.tsx   P2 buyer statement (noindex; client part in <Suspense>)
 │   ├── s/[token]/receipt/[paymentId]/page.tsx   P2
 │   └── supplier/
 │       ├── page.tsx                P3 overview
 │       ├── buyers/[id]/page.tsx    P3 buyer detail (copy link, record payment)
 │       ├── payments/[id]/page.tsx  P3 payment detail
 │       └── import/page.tsx         P3 ERP upload (admin only)
-├── components/                     P2–P3 PayPanel · AskBox · MemoGroup · InvoiceList · StatusChip · Receipt · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
+├── components/                     P2 Statement · PayPanel · MemoGroup · InvoiceList · StatusChip · Notices · DemoLogin · Receipt · StartDemo — P3–P4 AskBox · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
 ├── lib/
 │   ├── api.ts                      P2 typed API client
 │   ├── money.ts                    P2 the only money formatter
-│   └── paypal.ts                   P2 tiny PayPal JS SDK loader (URL from /api/config, no extra dependency)
+│   ├── dates.ts                    P2 New York "today" + relative days for buyer screens
+│   ├── paypal.ts                   P2 tiny PayPal JS SDK loader (URL from /api/config, no extra dependency)
+│   └── money.test.ts               P2 `npm test` (node --test, Node 22 in CI)
 │
 ├── backend/
 │   ├── main.py                     P0 FastAPI app (uvicorn) — Render api service
 │   ├── worker.py                   P3 background worker: sweep every 30 s + daily reminder drafting
-│   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2
-│   ├── db/         session.py P0 · models.py P1 · migrations/ (Alembic) P0–P1
+│   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2 · logging.py P2 (statement tokens out of access logs)
+│   ├── db/         session.py P0 (+ get_session_factory P2) · models.py P1 · migrations/ (Alembic) P0–P2
 │   ├── paypal/     client.py P1 · invoices.py P1 · orders.py P2 · webhooks.py P3
 │   ├── services/   importer.py P1 · mirror.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · sync.py (sweep) P3 · proposals.py P3 · audit.py P1
-│   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · supplier.py P3 · paypal_webhook.py P3
+│   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · config.py P2 (`GET /api/config`) · supplier.py P3 · paypal_webhook.py P3
 │   └── agent/      llm.py P0 (smoke call) → P4 · tools.py · schemas.py · answer.py · triage.py · reminders.py · prompts/*.md   P4
 ├── seed/
 │   ├── __init__.py · demo_seed.py  P1 `python -m seed.demo_seed`: one demo copy on dev with real sandbox invoices (same path as /api/demo/start)
@@ -116,6 +118,7 @@ memo-to-cash/
 Open checks (TRD §9): ~~1 PUT on PARTIALLY_PAID~~ ✅ P1 · 2 Venmo in sandbox · 3 webhook to Render · 4 LLM latency on real statements · ~~5~~ ✅ P0 · ~~6 transaction id~~ ✅ P1 · ~~7~~ ✅ P0 · ~~8 past dates~~ ✅ P1 · ~~9 tiny amounts~~ ✅ P1 · ~~10 Request-Id on create~~ ❌ not honoured (search & adopt) · ~~11 duplicate error~~ ✅ `details[].issue`.
 
 ## Decisions log (newest first — add one line per decision)
+- 2026-11-10 **P2 smoke on the real sandbox** (`scripts/sandbox/p2_smoke.py`): $5,000 order with items → approved by the sandbox buyer → captured `COMPLETED` (capture id, amount, custom_id ✓) → recorded $3,500 + $1,500: **INV-1038 MARKED_AS_PAID $0 due, INV-1042 PARTIALLY_PAID $2,000 due — equal to our ledger.** Check 12 ✅. Check 13: items are on the order but **PayPal's new checkout page doesn't show them** (only the total) → docs/video no longer claim the split shows inside PayPal; Pay Later at $5,000 = Pay Monthly + PayPal Credit. R2: a sandbox-mocked decline is **not** replayed for the same capture Request-Id (suffix kept as extra safety). `payment_source.paypal` orders start `PAYER_ACTION_REQUIRED` with only a `payer-action` link; a bare checkout link without `return_url` spins after Pay (approval still succeeds) — irrelevant for the JS SDK popup.
 - 2026-11-10 **P2 review fixes** (no feature cut — Bhargavi: nothing is cut in P2): BACKEND_SCHEMA §8 order→capture now says GET the order before VOIDED (R1); D5(e) receipt before recording; step 5 split into 5a–5d; smoke script calls the Orders/Invoicing clients directly; own PayPal SDK loader (no `@paypal/react-paypal-js`); spare sandbox buyer with $99,999 if the balance can't be raised.
 - 2026-11-10 **Neon fixed (hotfix `7d63adb`):** Render health check → `/api/health/live` (no DB). Production `main` had been awake 100% (7.8 h of 7.8 h, ~6 CU-h/day → free 100 CU-h gone ~Nov 25–27). After the change it went idle at 11:05 UTC; cold start 0.98 s, warm 0.18 s. **Render does not apply `render.yaml` changes by itself** (health check path and earlier the deploy trigger were set by hand) → every `render.yaml` change needs a Blueprint Manual Sync or a dashboard edit.
 - 2026-11-10 **Neon free-plan risk (P2 D24):** Render's health check hits `/api/health`, which queries the database every few seconds, so production Neon never scales to zero → 100 CU-h/month could run out during judging and suspend the live demo. Fix: health check path `/api/health/live` (no DB), production max 0.25 CU, adaptive worker polling in P3. Also D23: a payment made directly on PayPal's invoice page before P3 → our record fails safely (FAILED + mismatch), reconciled by P3 backfill.

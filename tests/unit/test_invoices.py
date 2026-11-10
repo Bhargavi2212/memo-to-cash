@@ -222,3 +222,39 @@ def test_put_adjustment_on_part_paid():
     g = fixture("get_invoice_after_put")
     assert g["status"] == "PARTIALLY_PAID" and g["due_amount"]["value"] == "3429.95"
     assert g["items"][-1]["unit_amount"]["value"] == "-20.00"
+
+
+@pytest.mark.anyio
+async def test_record_payment_is_never_blindly_retried(settings, monkeypatch):
+    """A lost answer + a blind retry could record the money twice (PayPal ignores a repeated
+    Request-Id on invoice calls — open check 10). Retries go through resolve_recording."""
+    import httpx
+
+    from backend.paypal import client as ppclient
+    from backend.paypal.client import PayPal
+
+    async def instant(_s):
+        return None
+
+    monkeypatch.setattr(ppclient, "_sleep", instant)
+    ppclient.clear_token_cache()
+    calls = []
+
+    def handler(req):
+        if req.url.path == "/v1/oauth2/token":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 32400})
+        calls.append(req)
+        return httpx.Response(503, json={"name": "INTERNAL_SERVER_ERROR"})
+
+    pp = PayPal(settings, transport=httpx.MockTransport(handler))
+    with pytest.raises(PayPalError):
+        await inv.record_payment(
+            pp,
+            "INV2-1",
+            allocation_uid="u1",
+            amount_cents=100,
+            method="PAYPAL",
+            payment_date=D,
+            note="[MTC:u1] x",
+        )
+    assert len(calls) == 1

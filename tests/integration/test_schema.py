@@ -128,3 +128,33 @@ def test_duplicate_erp_invoice_no_for_same_buyer_rejected(db):
     _invoice(db, b, m)
     with pytest.raises(IntegrityError):
         _invoice(db, b, m)
+
+
+def test_payment_timestamps_and_capture_attempts(db):
+    """P2 R5/R2 (migration 0003): created_at/updated_at set, updated_at moves on change."""
+    import time
+
+    from sqlalchemy import text
+
+    from backend.db.models import Payment
+
+    b = _buyer(db)
+    p = Payment(buyer_id=b.id, source="STATEMENT", amount_cents=500000, status="CREATED")
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    assert p.created_at is not None and p.updated_at is not None
+    assert p.capture_attempts == 0 and p.uid is not None
+    before = p.updated_at
+    time.sleep(0.05)
+    p.status = "CAPTURED"
+    db.commit()
+    db.refresh(p)
+    assert p.updated_at > before and p.created_at <= before
+    # set by the database trigger too, for writes outside the ORM
+    orm_time = p.updated_at
+    time.sleep(0.05)
+    db.execute(text("UPDATE payments SET status = 'VOIDED' WHERE id = :i"), {"i": p.id})
+    db.commit()
+    db.refresh(p)
+    assert p.status == "VOIDED" and p.updated_at > orm_time

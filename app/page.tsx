@@ -1,5 +1,7 @@
-// Landing shell (P0). The judge path — "Start the demo", "See the supplier side",
-// "Start again" — is wired in P5 (docs/UI_UX.md §4.5).
+// Landing (UI_UX §4.5, P2 D17). "Start the demo" is wired here in P2; "See the supplier side"
+// arrives with the supplier screens in P3; final copy and polish in P5.
+import { StartDemo } from "@/components/StartDemo";
+
 export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-[960px] flex-1 flex-col justify-center px-4 py-16">
@@ -11,9 +13,13 @@ export default function Home() {
       <p className="mt-6 max-w-prose text-muted">
         For goods sent on memo. Every number traces back to a memo line, a return or a payment.
       </p>
-      <div className="mt-10 rounded-card border border-line bg-surface p-4 text-sm text-muted">
-        The live demo opens here soon. Sandbox only — no real money moves.
+      <div className="mt-10">
+        <StartDemo />
       </div>
+      <p className="mt-10 text-xs text-muted">
+        Sandbox only — no real money moves. The PayPal sandbox buyer login is shown on the
+        statement page.
+      </p>
     </main>
   );
 }

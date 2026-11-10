@@ -1,0 +1,148 @@
+{
+  "amount": {
+    "breakdown": {
+      "discount": {
+        "invoice_discount": {
+          "amount": {
+            "currency_code": "USD",
+            "value": "0.00"
+          }
+        },
+        "item_discount": {
+          "currency_code": "USD",
+          "value": "0.00"
+        }
+      },
+      "item_total": {
+        "currency_code": "USD",
+        "value": "3500.00"
+      },
+      "tax_total": {
+        "currency_code": "USD",
+        "value": "0.00"
+      }
+    },
+    "currency_code": "USD",
+    "value": "3500.00"
+  },
+  "configuration": {
+    "allow_only_pay_by_bank": false,
+    "allow_tip": false,
+    "allow_vba_payments": false,
+    "partial_payment": {
+      "allow_partial_payment": true,
+      "minimum_amount_due": {
+        "currency_code": "USD",
+        "value": "1.00"
+      }
+    },
+    "save_item_for_future": true,
+    "tax_calculated_after_discount": false,
+    "tax_inclusive": false,
+    "template_id": "TEMP-6SA13879W6583252W"
+  },
+  "detail": {
+    "archived": false,
+    "category_code": "SHIPPABLE",
+    "currency_code": "USD",
+    "group_draft": false,
+    "invoice_date": "2026-10-21",
+    "invoice_number": "INV-1042-nxua1z",
+    "memo": "Kept from memo M-207 \u00b7 ERP INV-1042",
+    "metadata": {
+      "caller_type": "API_V2_INVOICE",
+      "create_time": "2026-11-10T11:36:23Z",
+      "created_by_flow": "REGULAR_SINGLE",
+      "invoicer_view_url": "https://www.sandbox.paypal.com/invoice/details/INV2-F5SC-E45S-ZES7-PWZE",
+      "last_update_time": "2026-11-10T11:48:05Z",
+      "recipient_view_url": "https://www.sandbox.paypal.com/invoice/p/REDACTED",
+      "spam_info": {}
+    },
+    "note": "See everything you owe and pay several invoices at once: http://localhost:3000/s/gMGt000yWegEGzBLikzLsDxSRvhxDLRymWOj3vYebzA",
+    "payment_term": {
+      "due_date": "2026-11-20",
+      "term_type": "DUE_ON_DATE_SPECIFIED"
+    },
+    "reference": "M-207",
+    "viewed_by_recipient": false
+  },
+  "due_amount": {
+    "currency_code": "USD",
+    "value": "2000.00"
+  },
+  "id": "INV2-F5SC-E45S-ZES7-PWZE",
+  "invoicer": {
+    "business_name": "Demo Diamond Co.",
+    "email_address": "supplier@example.com"
+  },
+  "items": [
+    {
+      "description": "SKU S-110 \u00b7 memo M-207",
+      "id": "ITEM-1WL98417KM348001U",
+      "name": "S-110 Cushion 0.90ct (memo M-207)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "1900.00"
+      }
+    },
+    {
+      "description": "SKU S-111 \u00b7 memo M-207",
+      "id": "ITEM-0RE512636M149182H",
+      "name": "S-111 Tennis bracelet (memo M-207)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "1600.00"
+      }
+    }
+  ],
+  "links": [
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-F5SC-E45S-ZES7-PWZE",
+      "method": "GET",
+      "rel": "self"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-F5SC-E45S-ZES7-PWZE/payments",
+      "method": "POST",
+      "rel": "record-payment"
+    },
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-F5SC-E45S-ZES7-PWZE/refunds",
+      "method": "POST",
+      "rel": "record-refund"
+    }
+  ],
+  "payments": {
+    "paid_amount": {
+      "currency_code": "USD",
+      "value": "1500.00"
+    },
+    "transactions": [
+      {
+        "amount": {
+          "currency_code": "USD",
+          "value": "1500.00"
+        },
+        "method": "PAYPAL",
+        "note": "[MTC:29d1c4e2-4d6a-416c-9621-adf58a7848d1] Statement payment \u00b7 PayPal capture 9V339793VN420763H",
+        "payment_date": "2026-11-10",
+        "payment_date_time": "2026-11-10T00:00:00Z",
+        "payment_id": "EXTR-7E7520386D5989203",
+        "type": "EXTERNAL"
+      }
+    ]
+  },
+  "primary_recipients": [
+    {
+      "billing_info": {
+        "business_name": "Northside Jewelers",
+        "email_address": "buyer@example.com"
+      }
+    }
+  ],
+  "settings": {},
+  "status": "PARTIALLY_PAID",
+  "unilateral": false
+}
