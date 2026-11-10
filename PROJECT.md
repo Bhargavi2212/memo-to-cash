@@ -44,7 +44,7 @@ memo-to-cash/
 │   └── sandbox_smoke.py            P5 end-to-end run against the real sandbox
 │
 ├── package.json · next.config.ts · tsconfig.json · eslint.config.mjs · AGENTS.md   P0 (Next 16.4; Tailwind v4 via Turbopack CSS loader, tokens in app/globals.css; next-env.d.ts generated, git-ignored)
-├── render.yaml                     P0 Render Blueprint (web + api, Starter) · P3 adds the worker
+├── render.yaml                     P0 Render Blueprint (web + api, `0.5c-512mb`) · P3 adds the worker
 ├── requirements.txt · requirements-dev.txt · pyproject.toml (ruff, pytest)  P0
 ├── alembic.ini                     P0 (migrations use DATABASE_URL_UNPOOLED)
 ├── .github/workflows/ci.yml        P0 ruff · pytest · tsc · eslint
