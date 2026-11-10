@@ -46,6 +46,7 @@ class FakePayPal:
         self.captured_value: str | None = None  # override the captured amount (mismatch tests)
         self.delay: dict[str, float] = {}  # op -> seconds (slow PayPal)
         self.requests: list[httpx.Request] = []  # every API request (headers for Request-Id)
+        self.hooks: dict[str, Any] = {}  # op -> callable(request), run before answering
         self._n = 0
 
     # -- helpers for tests --
@@ -62,7 +63,7 @@ class FakePayPal:
 
     def transport(self) -> httpx.MockTransport:
         async def handler(request: httpx.Request) -> httpx.Response:
-            op = self._op(request)
+            op = self.classify(request)
             if op and self.delay.get(op[0]):
                 await asyncio.sleep(self.delay[op[0]])
             return self.handle(request)
@@ -77,8 +78,27 @@ class FakePayPal:
         return [
             r.headers.get("PayPal-Request-Id", "")
             for r in self.requests
-            if (self._op(r) or ("",))[0] == op
+            if (self.classify(r) or ("",))[0] == op
         ]
+
+    def classify(self, request: httpx.Request) -> tuple[str, str] | None:
+        """(op, key) for any API request — Orders or Invoicing."""
+        found = self._op(request)
+        if found:
+            return found
+        path, m = request.url.path, request.method
+        base = "/v2/invoicing/invoices"
+        if m == "POST" and path == base:
+            return ("create", "")
+        if m == "POST" and path == "/v2/invoicing/search-invoices":
+            return ("search", "")
+        if m == "POST" and path.endswith("/send"):
+            return ("send", path.split("/")[-2])
+        if m == "POST" and path.endswith("/payments"):
+            return ("record", path.split("/")[-2])
+        if m == "GET" and path.startswith(base + "/"):
+            return ("get", path.split("/")[-1])
+        return None
 
     def add_existing(self, body: dict[str, Any], status: str = "DRAFT") -> dict[str, Any]:
         """Simulate an invoice PayPal already has (e.g. a create whose answer was lost)."""
@@ -183,11 +203,15 @@ class FakePayPal:
             op, key = "search", body.get("invoice_number", "")
         elif request.method == "POST" and path.endswith("/send"):
             op, key = "send", path.split("/")[-2]
+        elif request.method == "POST" and path.endswith("/payments"):
+            op, key = "record", path.split("/")[-2]
         elif request.method == "GET" and path.startswith(base + "/"):
             op, key = "get", path.split("/")[-1]
         else:
             return error(404, "RESOURCE_NOT_FOUND")
         self.calls.append((op, key))
+        if op in self.hooks:
+            self.hooks[op](request)
         queued = self.faults.get(op)
         if queued:
             nxt = queued.pop(0)
@@ -211,6 +235,8 @@ class FakePayPal:
             return error(404, "RESOURCE_NOT_FOUND")
         if op == "get":
             return httpx.Response(200, json=inv)
+        if op == "record":
+            return self.record(key, body)
         # send
         if inv["status"] == "DRAFT":
             inv["status"] = "UNPAID"
@@ -222,5 +248,41 @@ class FakePayPal:
                 "href": inv["detail"]["metadata"]["recipient_view_url"],
                 "rel": "payer-view",
                 "method": "GET",
+            },
+        )
+
+    def record(self, inv_id: str, body: dict[str, Any]) -> httpx.Response:
+        """Record payment like the sandbox: due drops, note visible in transactions."""
+        inv = self.invoices[inv_id]
+        due = to_cents(inv["due_amount"]["value"])
+        amount = to_cents(body["amount"]["value"])
+        if amount > due:
+            return error(
+                422,
+                "UNPROCESSABLE_ENTITY",
+                details=[{"issue": "PAYMENT_AMOUNT_GREATER_THAN_AMOUNT_DUE"}],
+            )
+        self._n += 1
+        txn = {
+            "payment_id": f"TXN-FAKE-{self._n:04d}",
+            "note": body.get("note"),
+            "method": body.get("method"),
+            "amount": body["amount"],
+        }
+        payments = inv.setdefault("payments", {"transactions": []})
+        payments["transactions"].append(txn)
+        left = due - amount
+        inv["due_amount"] = {"currency_code": "USD", "value": f"{left // 100}.{left % 100:02d}"}
+        inv["status"] = "MARKED_AS_PAID" if left == 0 else "PARTIALLY_PAID"
+        return httpx.Response(200, json={"payment_id": txn["payment_id"]})
+
+    def pay_elsewhere(self, inv_id: str, amount_cents: int) -> None:
+        """Someone pays this invoice on PayPal's own page (P2 D23)."""
+        self.record(
+            inv_id,
+            {
+                "amount": {"value": f"{amount_cents // 100}.{amount_cents % 100:02d}"},
+                "note": "paid on PayPal page",
+                "method": "PAYPAL",
             },
         )

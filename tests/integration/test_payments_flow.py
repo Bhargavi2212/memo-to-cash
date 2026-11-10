@@ -5,6 +5,7 @@ Orders answers have the shape of the real smoke fixtures.
 """
 
 import asyncio
+import json
 import time
 
 import httpx
@@ -400,3 +401,144 @@ async def test_another_buyers_order_is_not_found(db, pp, fake, buyer):
     with pytest.raises(StatementNotFoundError):
         await capture(pp, buyer, o.paypal_order_id)
     assert "order_capture" not in fake.ops()
+
+
+# ================================================================ recording (step 7: D7, R13, D23)
+
+from backend.services.mirror import mirror_invoices  # noqa: E402
+
+
+async def paid_5000(db, pp, fake, buyer, settings):
+    """Mirror the seed to the fake PayPal, then order + capture $5,000."""
+    s = settings.model_copy(
+        update={
+            "app_base_url": "https://memo.example",
+            "paypal_business_email": "supplier@example.com",
+        }
+    )
+    res = await mirror_invoices(
+        buyer.id, PayPal(s, transport=fake.transport()), s, SessionLocal, today=D
+    )
+    assert res.ok
+    o = await order(pp, buyer)
+    fake.approve(o.paypal_order_id)
+    await capture(pp, buyer, o.paypal_order_id)
+    fake.calls.clear()
+    fake.requests.clear()
+    return o
+
+
+def allocs(db, payment_id):
+    db.expire_all()
+    return {
+        inv_no: a
+        for a, inv_no in db.execute(
+            select(Allocation, Invoice.erp_invoice_no)
+            .join(Invoice, Allocation.invoice_id == Invoice.id)
+            .where(Allocation.payment_id == payment_id)
+        )
+    }
+
+
+async def test_record_happy_path(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    paid_before = {i.erp_invoice_no: i.paid_cents for i in db.scalars(select(Invoice))}
+    seen_state = []
+    fake.hooks["record"] = lambda req: seen_state.append(
+        sorted(a.record_state for a in allocs(db, o.payment_id).values())
+    )
+    await pay.record_allocations(SessionLocal, pp, o.payment_id)
+    assert seen_state[0] == ["RECORDING", "RECORDING"]  # committed BEFORE PayPal (invariant 10)
+    a = allocs(db, o.payment_id)
+    assert {k: v.record_state for k, v in a.items()} == {
+        "INV-1038": "RECORDED",
+        "INV-1042": "RECORDED",
+    }
+    assert all(v.paypal_transaction_id and v.paypal_recorded_at for v in a.values())
+    assert sorted(fake.request_ids("record")) == sorted(f"test-alloc-{v.uid}" for v in a.values())
+    notes = [
+        json.loads(r.content)["note"] for r in fake.requests if r.url.path.endswith("/payments")
+    ]
+    assert all(n.startswith("[MTC:") and "PayPal capture CAP-FAKE" in n for n in notes)
+    i38, i42 = inv(db, "INV-1038"), inv(db, "INV-1042")
+    assert (i38.paypal_status, i38.paypal_due_cents, i38.mismatch) == ("MARKED_AS_PAID", 0, None)
+    assert (i42.paypal_status, i42.paypal_due_cents, i42.mismatch) == (
+        "PARTIALLY_PAID",
+        200000,
+        None,
+    )
+    assert {
+        i.erp_invoice_no: i.paid_cents for i in db.scalars(select(Invoice))
+    } == paid_before  # D8
+
+
+async def test_record_4xx_fails_and_timeout_stays_recording(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    fake.fail("record", error(400, "INVALID_REQUEST"), httpx.ReadTimeout("slow"))
+    await pay.record_allocations(SessionLocal, pp, o.payment_id)
+    states = sorted(v.record_state for v in allocs(db, o.payment_id).values())
+    assert states == ["FAILED", "RECORDING"]
+    failed = next(v for v in allocs(db, o.payment_id).values() if v.record_state == "FAILED")
+    assert "INVALID_REQUEST" in failed.paypal_record_error
+
+
+async def test_d23_paid_elsewhere_fails_safely_without_retry(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    i38 = inv(db, "INV-1038")
+    fake.pay_elsewhere(i38.paypal_invoice_id, 350000)  # buyer paid INV-1038 on PayPal's page
+    fake.calls.clear()
+    await pay.record_allocations(SessionLocal, pp, o.payment_id)
+    a = allocs(db, o.payment_id)
+    assert a["INV-1038"].record_state == "FAILED"
+    assert a["INV-1038"].paypal_record_error.startswith("PAYMENT_AMOUNT_GREATER_THAN_AMOUNT_DUE")
+    assert inv(db, "INV-1038").mismatch == pay.PAID_ELSEWHERE
+    assert a["INV-1042"].record_state == "RECORDED"
+    assert inv(db, "INV-1038").paid_cents == 350000  # the money is safe in our ledger
+    fake.calls.clear()
+    await pay.resolve_recording(SessionLocal, pp, o.payment_id)  # /refresh: no retry loop
+    assert "record" not in fake.ops()
+
+
+async def test_resolve_finds_the_note_without_a_second_record(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+
+    def record_then_lose_answer(req):  # PayPal records it, our call never hears back
+        fake.record(req.url.path.split("/")[-2], json.loads(req.content))
+        raise httpx.ReadTimeout("lost")
+
+    fake.hooks["record"] = record_then_lose_answer
+    pay.RECORD_CAP_S, saved = 2.0, pay.RECORD_CAP_S
+    try:
+        await pay.record_allocations(SessionLocal, pp, o.payment_id)
+    finally:
+        pay.RECORD_CAP_S = saved
+    assert {v.record_state for v in allocs(db, o.payment_id).values()} == {"RECORDING"}
+    del fake.hooks["record"]
+    fake.calls.clear()
+    await pay.resolve_recording(SessionLocal, pp, o.payment_id)
+    a = allocs(db, o.payment_id)
+    assert {v.record_state for v in a.values()} == {"RECORDED"}
+    assert "record" not in fake.ops()  # found by [MTC:uid], not recorded twice
+    assert all(v.paypal_transaction_id for v in a.values())
+    assert inv(db, "INV-1042").paypal_due_cents == 200000
+
+
+async def test_resolve_not_found_retries_with_the_same_request_id(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    fake.fail("record", *[httpx.ReadTimeout("slow")] * 2)  # one per allocation (no blind retries)
+    await pay.record_allocations(SessionLocal, pp, o.payment_id)
+    first = fake.request_ids("record")
+    fake.requests.clear()
+    await pay.resolve_recording(SessionLocal, pp, o.payment_id)
+    assert {v.record_state for v in allocs(db, o.payment_id).values()} == {"RECORDED"}
+    assert set(fake.request_ids("record")) <= set(first)  # same keys as before
+
+
+async def test_record_overall_cap(db, pp, fake, buyer, settings, monkeypatch):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    monkeypatch.setattr(pay, "RECORD_CAP_S", 0.3)
+    fake.delay["record"] = 3.0
+    t0 = time.perf_counter()
+    await pay.record_allocations(SessionLocal, pp, o.payment_id)
+    assert time.perf_counter() - t0 < 2.0
+    assert {v.record_state for v in allocs(db, o.payment_id).values()} == {"RECORDING"}

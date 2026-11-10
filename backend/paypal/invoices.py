@@ -232,4 +232,9 @@ async def record_payment(
             amount_cents=amount_cents, method=method, payment_date=payment_date, note=note
         ),
         request_id=request_id(pp.settings, "alloc", allocation_uid),
+        # NO automatic retries: PayPal ignored a repeated Request-Id on invoice create (open
+        # check 10), so a blind retry after a lost answer could record the money twice.
+        # Retries go through payments.resolve_recording, which first looks for our
+        # [MTC:<uid>] note on the invoice (TRD §6b-3).
+        retries=0,
     )

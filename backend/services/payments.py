@@ -25,6 +25,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.core.money import to_cents
 from backend.core.split import OpenInvoice, SplitError, resolve_request, split_payment
 from backend.db.models import Allocation, Invoice, Memo, Payment
+from backend.paypal import invoices as pinv
 from backend.paypal import orders
 from backend.paypal.client import PayPal, PayPalError
 from backend.services import audit
@@ -425,3 +426,236 @@ def _settled_by_id(session_factory: Callable[[], Session], payment_id: int) -> C
         p = s.get(Payment, payment_id)
         assert p is not None
         return _settled(p)
+
+
+# ---------------------------------------------------------------- recording (D7, R13, D23)
+
+RECORD_CAP_S = 12.0  # overall cap for one payment's PayPal recording calls (D7)
+OVERPAY_ISSUE = "PAYMENT_AMOUNT_GREATER_THAN_AMOUNT_DUE"
+PAID_ELSEWHERE = "PayPal shows less due than our ledger — paid elsewhere?"
+
+
+@dataclass
+class _Job:
+    allocation_id: int
+    uid: str
+    paypal_invoice_id: str | None
+    amount_cents: int
+    capture_id: str | None
+
+
+@dataclass
+class _Result:
+    transaction_id: str | None = None
+    invoice: dict[str, Any] | None = None
+    error: PayPalError | None = None
+    done: bool = False  # PayPal answered (success or a deterministic error)
+
+
+def _mark_recording(
+    session_factory: Callable[[], Session], payment_id: int, states: tuple[str, ...]
+) -> list[_Job]:
+    """One transaction: every allocation to (re)record → RECORDING, committed BEFORE any
+    PayPal call (invariant 10, R13)."""
+    with session_factory() as s, s.begin():
+        p = s.get(Payment, payment_id)
+        if p is None or p.status != "CAPTURED":
+            return []
+        lock_buyer(s, p.buyer_id)
+        allocs = s.scalars(
+            select(Allocation)
+            .where(Allocation.payment_id == payment_id, Allocation.record_state.in_(states))
+            .order_by(Allocation.id)
+        ).all()
+        invoice_of = {
+            i.id: i.paypal_invoice_id
+            for i in s.scalars(
+                select(Invoice).where(Invoice.id.in_({a.invoice_id for a in allocs}))
+            )
+        }
+        now = datetime.now(UTC)
+        jobs = []
+        for a in allocs:
+            a.record_state = "RECORDING"
+            a.record_started_at = now
+            a.attempts += 1
+            jobs.append(
+                _Job(
+                    a.id,
+                    str(a.uid),
+                    invoice_of.get(a.invoice_id),
+                    a.amount_cents,
+                    p.paypal_capture_id,
+                )
+            )
+        return jobs
+
+
+async def _record_one(pp: PayPal, job: _Job, today: Any, resolve: bool) -> _Result:
+    out = _Result()
+    if not job.paypal_invoice_id:
+        out.error = PayPalError("NOT_ON_PAYPAL", "invoice has no PayPal id", None, [], None)
+        out.done = True
+        return out
+    token = f"[MTC:{job.uid}]"
+    try:
+        if resolve:  # TRD §6b-3: before any retry, look for our own note first
+            inv = await pinv.get(pp, job.paypal_invoice_id)
+            for txn in (inv.get("payments") or {}).get("transactions") or []:
+                if token in (txn.get("note") or ""):
+                    out.transaction_id, out.invoice, out.done = txn.get("payment_id"), inv, True
+                    return out
+        rec = await pinv.record_payment(
+            pp,
+            job.paypal_invoice_id,
+            allocation_uid=job.uid,
+            amount_cents=job.amount_cents,
+            method="PAYPAL",
+            payment_date=today,
+            note=f"{token} Statement payment · PayPal capture {job.capture_id}",
+        )
+        out.transaction_id, out.done = rec.get("payment_id"), True
+        try:
+            out.invoice = await pinv.get(pp, job.paypal_invoice_id)
+        except PayPalError:
+            pass  # recorded; the sync of PayPal's due waits for the next GET
+    except PayPalError as e:
+        out.error = e
+        out.done = not e.transient
+    return out
+
+
+def _write_results(
+    session_factory: Callable[[], Session],
+    payment_id: int,
+    jobs: list[_Job],
+    results: list[_Result | None],
+) -> None:
+    with session_factory() as s, s.begin():
+        p = s.get(Payment, payment_id)
+        assert p is not None
+        lock_buyer(s, p.buyer_id)
+        now = datetime.now(UTC)
+        for job, res in zip(jobs, results, strict=True):
+            a = s.get(Allocation, job.allocation_id)
+            assert a is not None
+            if (
+                res is None or not res.done
+            ):  # timeout / transient: stays RECORDING (sweep, /refresh)
+                if res and res.error:
+                    a.paypal_record_error = f"{res.error.name}: {res.error.message}"[:500]
+                continue
+            inv = s.get(Invoice, a.invoice_id)
+            assert inv is not None
+            if res.error is None:
+                a.record_state = "RECORDED"
+                a.paypal_recorded_at = now
+                a.paypal_transaction_id = res.transaction_id
+                a.paypal_record_error = None
+                audit.log(
+                    s,
+                    "system",
+                    "allocation.recorded",
+                    ref=str(a.uid),
+                    detail={"payment_id": payment_id, "invoice_id": inv.id},
+                )
+                if res.invoice:
+                    inv.paypal_status = res.invoice.get("status") or inv.paypal_status
+                    due = (res.invoice.get("due_amount") or {}).get("value")
+                    if due is not None:
+                        inv.paypal_due_cents = to_cents(due)
+                        ours = inv.total_cents - inv.paid_cents
+                        inv.mismatch = (
+                            None
+                            if inv.paypal_due_cents == ours
+                            else f"PayPal due {inv.paypal_due_cents} ≠ ours {ours} (cents)"
+                        )
+                    inv.paypal_synced_at = now
+            else:
+                e = res.error
+                a.record_state = "FAILED"
+                a.paypal_record_error = f"{e.name}: {e.message}"[:500] + (
+                    f" (debug_id {e.debug_id})" if e.debug_id else ""
+                )
+                if OVERPAY_ISSUE in orders.issues(e):  # D23: paid on PayPal's page meanwhile
+                    a.paypal_record_error = f"{OVERPAY_ISSUE}: {PAID_ELSEWHERE}"
+                    inv.mismatch = PAID_ELSEWHERE
+                log.warning("record failed allocation=%s %s debug_id=%s", a.id, e.name, e.debug_id)
+
+
+async def _run(pp: PayPal, jobs: list[_Job], resolve: bool) -> list[_Result | None]:
+    from backend.core.dates import today_ny
+
+    day = today_ny()
+    tasks = [asyncio.create_task(_record_one(pp, j, day, resolve)) for j in jobs]
+    done, pending = await asyncio.wait(tasks, timeout=RECORD_CAP_S)
+    for t in pending:
+        t.cancel()
+    return [t.result() if t in done and not t.cancelled() else None for t in tasks]
+
+
+async def record_allocations(
+    session_factory: Callable[[], Session], pp: PayPal, payment_id: int
+) -> None:
+    """After the capture commit (BackgroundTask, R14): PENDING allocations → RECORDING (one
+    txn) → record on PayPal concurrently (12 s overall) → one txn writes the results.
+    Never changes paid_cents: the allocation already counted at capture (D8)."""
+    jobs = await run_in_threadpool(_mark_recording, session_factory, payment_id, ("PENDING",))
+    if not jobs:
+        return
+    results = await _run(pp, jobs, resolve=False)
+    await run_in_threadpool(_write_results, session_factory, payment_id, jobs, results)
+
+
+async def resolve_recording(
+    session_factory: Callable[[], Session], pp: PayPal, payment_id: int
+) -> None:
+    """P2 retry path (`/refresh`, R4) and the P3 sweep: for RECORDING / FAILED allocations,
+    GET the invoice and look for `[MTC:<uid>]` → RECORDED; not found → record again with the
+    SAME Request-Id. At most one call per allocation, 12 s cap. D23 overpays are skipped."""
+
+    def mark() -> list[_Job]:
+        with session_factory() as s, s.begin():
+            p = s.get(Payment, payment_id)
+            if p is None or p.status != "CAPTURED":
+                return []
+            lock_buyer(s, p.buyer_id)
+            allocs = s.scalars(
+                select(Allocation)
+                .where(
+                    Allocation.payment_id == payment_id,
+                    Allocation.record_state.in_(("RECORDING", "FAILED")),
+                )
+                .order_by(Allocation.id)
+            ).all()
+            allocs = [
+                a for a in allocs if not (a.paypal_record_error or "").startswith(OVERPAY_ISSUE)
+            ]
+            invoice_of = {
+                i.id: i.paypal_invoice_id
+                for i in s.scalars(
+                    select(Invoice).where(Invoice.id.in_({a.invoice_id for a in allocs}))
+                )
+            }
+            now = datetime.now(UTC)
+            out = []
+            for a in allocs:
+                a.record_state = "RECORDING"
+                a.record_started_at = now
+                a.attempts += 1
+                out.append(
+                    _Job(
+                        a.id,
+                        str(a.uid),
+                        invoice_of.get(a.invoice_id),
+                        a.amount_cents,
+                        p.paypal_capture_id,
+                    )
+                )
+            return out
+
+    jobs = await run_in_threadpool(mark)
+    if not jobs:
+        return
+    results = await _run(pp, jobs, resolve=True)
+    await run_in_threadpool(_write_results, session_factory, payment_id, jobs, results)
