@@ -281,45 +281,72 @@ def _set(obj: Any, values: dict[str, Any]) -> bool:
 
 
 def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportResult) -> None:
-    # 1. Find existing real buyers (demo copies are always new, D2) and lock them (inv. 9).
-    found: dict[str, Buyer | None] = {}
-    for email, r in p.buyers.items():
-        b = None
-        if demo_session is None:
-            b = session.scalars(
-                select(Buyer).where(Buyer.email == r.v["buyer_email"], Buyer.demo_session.is_(None))
-            ).first()
-            if b is not None:
-                session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": b.id})
-        found[email] = b
+    """Few round-trips (review R6): existing rows are prefetched per level in one query each,
+    new rows are written with one flush per level. A demo copy (always a new buyer) does no
+    lookups at all."""
+    # 1. Existing real buyers (demo copies are always new, D2), locked (invariant 9).
+    found: dict[str, Buyer | None] = dict.fromkeys(p.buyers)
+    if demo_session is None and p.buyers:
+        emails = {r.v["buyer_email"]: key for key, r in p.buyers.items()}
+        for b in session.scalars(
+            select(Buyer).where(Buyer.email.in_(emails), Buyer.demo_session.is_(None))
+        ):
+            found[emails[b.email]] = b
+    known_ids = sorted(b.id for b in found.values() if b is not None)
+    for buyer_id in known_ids:
+        session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": buyer_id})
+
+    # Prefetch what the known buyers already have (nothing to fetch for new buyers).
+    memo_rows: dict[tuple[int, str], Memo] = {}
+    line_rows: dict[tuple[int, str], MemoLine] = {}  # (memo id, sku)
+    inv_rows: dict[tuple[int, str], Invoice] = {}
+    inv_lines: dict[int, list[InvoiceLine]] = {}
+    if known_ids:
+        for m in session.scalars(select(Memo).where(Memo.buyer_id.in_(known_ids))):
+            memo_rows[(m.buyer_id, m.memo_no)] = m
+        for line in session.scalars(
+            select(MemoLine)
+            .join(Memo, MemoLine.memo_id == Memo.id)
+            .where(Memo.buyer_id.in_(known_ids))
+        ):
+            line_rows[(line.memo_id, line.sku)] = line
+        for i in session.scalars(select(Invoice).where(Invoice.buyer_id.in_(known_ids))):
+            inv_rows[(i.buyer_id, i.erp_invoice_no)] = i
+        for il in session.scalars(
+            select(InvoiceLine)
+            .join(Invoice, InvoiceLine.invoice_id == Invoice.id)
+            .where(Invoice.buyer_id.in_(known_ids))
+        ):
+            inv_lines.setdefault(il.invoice_id, []).append(il)
+    sku_of = {line.id: line.sku for line in line_rows.values()}
+
+    def item_set(invoice_id: int) -> list[tuple[str, int]]:
+        return sorted(
+            (sku_of[il.memo_line_id], il.amount_cents)
+            for il in inv_lines.get(invoice_id, [])
+            if il.memo_line_id is not None
+        )
 
     # 2. Before any write: an invoice already on PayPal must not change (dates or item lines).
     existing_inv: dict[str, Invoice] = {}
     for inv_no, r in p.invoices.items():
         b = found[p.memos[r.v["memo_no"]].v["buyer_email"].lower()]
-        if b is None:
-            continue
-        inv = session.scalars(
-            select(Invoice).where(Invoice.buyer_id == b.id, Invoice.erp_invoice_no == inv_no)
-        ).first()
+        inv = inv_rows.get((b.id, inv_no)) if b is not None else None
         if inv is None:
             continue
         existing_inv[inv_no] = inv
         if inv.paypal_invoice_id:
             new = _invoice_values(p, inv_no)
-            old = sorted(
-                session.execute(
-                    select(MemoLine.sku, InvoiceLine.amount_cents)
-                    .join(InvoiceLine, InvoiceLine.memo_line_id == MemoLine.id)
-                    .where(InvoiceLine.invoice_id == inv.id)
-                ).all()
-            )
-            if (inv.issued_on, inv.due_on, old) != (new["issued_on"], new["due_on"], new["items"]):
+            if (inv.issued_on, inv.due_on, item_set(inv.id)) != (
+                new["issued_on"],
+                new["due_on"],
+                new["items"],
+            ):
                 _err(result, r.n, f"INVOICE {inv_no} is already on PayPal and can't be changed")
     if result.errors:
         return
 
-    # 3. Writes.
+    # 3. Writes, one flush per level.
     buyers: dict[str, Buyer] = {}
     for email, r in p.buyers.items():
         b = found[email]
@@ -332,20 +359,18 @@ def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportR
                 demo_session=demo_session,
             )
             session.add(b)
-            session.flush()
             result.created["buyers"] += 1
         elif _set(b, {"name": r.v["buyer_name"]}):
             result.updated["buyers"] += 1
         buyers[email] = b
+    session.flush()
     result.buyer_ids = [b.id for b in buyers.values()]
 
     memos: dict[str, Memo] = {}
     for memo_no, r in p.memos.items():
         b = buyers[r.v["buyer_email"].lower()]
         vals = {"sent_on": _d(r.v["sent_on"]), "due_back_on": _d(r.v["due_back_on"])}
-        m = session.scalars(
-            select(Memo).where(Memo.buyer_id == b.id, Memo.memo_no == memo_no)
-        ).first()
+        m = memo_rows.get((b.id, memo_no))
         if m is None:
             m = Memo(buyer_id=b.id, memo_no=memo_no, **vals)
             session.add(m)
@@ -368,9 +393,7 @@ def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportR
             "return_ref": ret.v["return_ref"] if ret else None,
         }
         m = memos[memo_no]
-        line = session.scalars(
-            select(MemoLine).where(MemoLine.memo_id == m.id, MemoLine.sku == sku)
-        ).first()
+        line = line_rows.get((m.id, sku))
         if line is None:
             line = MemoLine(memo_id=m.id, sku=sku, **vals)
             session.add(line)
@@ -378,8 +401,9 @@ def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportR
         elif _set(line, vals):
             result.updated["lines"] += 1
         lines[key] = line
-    session.flush()
 
+    invoices: dict[str, Invoice] = {}
+    replace_lines: set[str] = set()
     for inv_no, r in p.invoices.items():
         memo = memos[r.v["memo_no"]]
         new = _invoice_values(p, inv_no)
@@ -395,17 +419,11 @@ def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportR
                 total_cents=new["total_cents"],
             )
             session.add(inv)
-            session.flush()
             result.created["invoices"] += 1
-            changed_lines = True
+            replace_lines.add(inv_no)
         else:
-            adjustments = sum(
-                session.scalars(
-                    select(InvoiceLine.amount_cents).where(
-                        InvoiceLine.invoice_id == inv.id, InvoiceLine.memo_line_id.is_(None)
-                    )
-                )
-            )
+            current = inv_lines.get(inv.id, [])
+            adjustments = sum(il.amount_cents for il in current if il.memo_line_id is None)
             changed = _set(
                 inv,
                 {
@@ -414,37 +432,29 @@ def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportR
                     "total_cents": new["total_cents"] + adjustments,
                 },
             )
-            current = {
-                il.memo_line_id
-                for il in session.scalars(
-                    select(InvoiceLine).where(
-                        InvoiceLine.invoice_id == inv.id, InvoiceLine.memo_line_id.is_not(None)
-                    )
-                )
-            }
-            wanted = {lines[(r.v["memo_no"], s)].id for s in new["skus"]}
-            changed_lines = current != wanted
-            if changed or changed_lines:
+            if item_set(inv.id) != new["items"]:
+                # Not on PayPal (checked above): replace its item lines.
+                for il in current:
+                    if il.memo_line_id is not None:
+                        session.delete(il)
+                replace_lines.add(inv_no)
+            if changed or inv_no in replace_lines:
                 result.updated["invoices"] += 1
-            if changed_lines:  # not yet on PayPal (checked above): replace its item lines
-                for il in session.scalars(
-                    select(InvoiceLine).where(
-                        InvoiceLine.invoice_id == inv.id, InvoiceLine.memo_line_id.is_not(None)
-                    )
-                ):
-                    session.delete(il)
-                session.flush()
-        if changed_lines:
-            for sku in new["skus"]:
-                line = lines[(r.v["memo_no"], sku)]
-                session.add(
-                    InvoiceLine(
-                        invoice_id=inv.id,
-                        memo_line_id=line.id,
-                        name=f"{sku} {line.description} (memo {r.v['memo_no']})",
-                        amount_cents=line.price_cents,
-                    )
+        invoices[inv_no] = inv
+    session.flush()  # memo lines + invoices (and any deletes) together
+
+    for inv_no in replace_lines:
+        r = p.invoices[inv_no]
+        for sku in _invoice_values(p, inv_no)["skus"]:
+            line = lines[(r.v["memo_no"], sku)]
+            session.add(
+                InvoiceLine(
+                    invoice_id=invoices[inv_no].id,
+                    memo_line_id=line.id,
+                    name=f"{sku} {line.description} (memo {r.v['memo_no']})",
+                    amount_cents=line.price_cents,
                 )
+            )
     session.flush()
 
 
