@@ -1,6 +1,6 @@
 # Memo-to-Cash — App Flow
 
-Who: **Supplier** (owner/accountant), **Buyer** (retailer), **Agent** (Llama, read + propose only), **PayPal**, **System** (our backend).
+Who: **Supplier** (owner/accountant), **Buyer** (retailer), **Agent** (Meta Model API / Muse, read + propose only), **PayPal**, **System** (our backend).
 
 ## 0. Big picture
 ```mermaid
@@ -80,7 +80,7 @@ Edge cases: buyer closes PayPal window → payment stays CREATED, nothing record
 sequenceDiagram
   participant B as Buyer
   participant A as API
-  participant L as Llama
+  participant L as LLM (Muse)
   participant D as DB
   participant S as Supplier
   participant P as PayPal
