@@ -84,3 +84,23 @@ def test_answer_schema_limits():
         with pytest.raises(ValidationError):
             AnswerResult.model_validate(bad)
     assert set(ANSWER_SCHEMA["schema"]["required"]) == set(a)
+
+
+def test_facts_dates_read_like_the_buyer_writes_them():
+    import re
+
+    text = facts_prompt(PAID)
+    assert re.findall(r"\d{4}-\d{2}-\d{2}", text) == []
+    line = next(ln for ln in SEED.lines if ln.sku == "S-102")
+    assert f"RETURNED on {line.returned_on:%b} {line.returned_on.day}, " in text
+
+
+def test_validator_accepts_written_dates_in_answers():
+    from backend.agent.validate import check_answer
+
+    d = next(ln for ln in SEED.lines if ln.sku == "S-102").returned_on
+    when = f"{d:%b} {d.day}, {d.year}"
+    text = f"S-102 isn't on your bill — return R-311 was received {when}, 38 days ago."
+    ans = AnswerResult(answer=text, cited_records=["memo_line:S-102", "return:R-311"],
+                       confidence="high", offer_escalation=False)  # fmt: skip
+    assert check_answer(ans, SEED) == []

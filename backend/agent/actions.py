@@ -46,6 +46,9 @@ class Action:
         return self.parts or [self]
 
 
+MARKUP_REASON = "message contains instruction-like markup"
+
+
 def _reply(reason: str, **evidence: Any) -> Action:
     return Action("REPLY", "REPLY", evidence={"source": "agent", **evidence}, reason=reason)
 
@@ -98,7 +101,8 @@ def _return_claim(fields: dict[str, Any], facts: Facts) -> Action:
 
 def decide(label: str, fields: dict[str, Any], text: str, facts: Facts) -> Action:
     if MARKUP_RE.search(text or ""):
-        return _reply("message contains instruction-like markup", checks=["markup guard"])
+        # the reason is for the supplier only; the buyer sees the plain "sent" line
+        return _reply(MARKUP_REASON, checks=["markup guard"], internal=True)
 
     sku = (fields.get("sku") or "").strip().upper() or None
     line = facts.line(sku)
@@ -122,7 +126,8 @@ def decide(label: str, fields: dict[str, Any], text: str, facts: Facts) -> Actio
             and (p.sku or "").upper() == line.sku
             for p in facts.proposals
         ):  # fmt: skip
-            return _reply("Already sent — waiting for their approval")
+            # R3: no second proposal — the buyer is told, nothing is filed
+            return _reply("Already sent — waiting for their approval", duplicate=True)
         checks = [
             f"{line.sku} kept on {inv.invoice_no}",
             f"{usd(amount)} ≤ price {usd(line.price_cents)}",

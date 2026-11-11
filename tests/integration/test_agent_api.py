@@ -121,8 +121,9 @@ def test_same_request_on_the_demo_copy_is_already_sent(db, api, llm_box):
     llm_box["fake"] = FakeLLM(triage=[triage("DEDUCTION_REQUEST", sku="S-120",
                                              amount_cents=2000)])  # fmt: skip
     r = api.post(f"/api/statement/{b.statement_token}/message", json={"text": "$20 off S-120"})
-    assert r.json()["summary"].endswith("(Already sent — waiting for their approval)")
-    assert [p.kind for p in proposals(db, b.id)] == ["ADJUSTMENT", "REPLY"]
+    assert r.json()["summary"] == "Already sent — waiting for their approval."
+    assert r.json()["proposal_ids"] == [] and r.json()["answer"] == r.json()["summary"]
+    assert [p.kind for p in proposals(db, b.id)] == ["ADJUSTMENT"]  # R3: nothing filed again
 
 
 def test_injection_creates_only_a_reply(db, api, llm_box):
@@ -133,6 +134,10 @@ def test_injection_creates_only_a_reply(db, api, llm_box):
     r = api.post(f"/api/statement/{b.statement_token}/message", json={"text": text}).json()
     assert r["fallback"] is False
     assert [p.kind for p in proposals(db, b.id)] == ["REPLY"]
+    # the guard's note is for the supplier, never shown to the buyer
+    assert r["summary"] == "Sent to Demo Diamond Co. — they'll write back"
+    reqs = api.get(f"/api/statement/{b.statement_token}").json()["requests"]
+    assert [q["summary"] for q in reqs] == ["Sent to Demo Diamond Co. — they'll write back"]
 
 
 @pytest.mark.parametrize(
@@ -185,7 +190,7 @@ def test_concurrent_duplicates_make_one_proposal(db, llm_box):
 
     r1, r2 = asyncio.run(both())
     kinds = sorted(p.kind for p in proposals(db, b.id))
-    assert kinds == ["ADJUSTMENT", "REPLY"]
+    assert kinds == ["ADJUSTMENT"]  # the second one is told "Already sent", nothing filed
     assert sorted([r1.summary.startswith("−$20.00"), r2.summary.startswith("−$20.00")]) == [
         False, True]  # fmt: skip
 

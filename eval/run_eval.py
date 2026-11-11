@@ -137,6 +137,7 @@ def main() -> None:
     ap.add_argument("--model", default=settings.llm_model)
     ap.add_argument("--rows", default=str(ROOT / "messages.jsonl"))
     ap.add_argument("--group", action="append", default=[], help="NAME=id,id (Z10)")
+    ap.add_argument("--jobs", choices=["all", "message", "ask"], default="all")
     args = ap.parse_args()
     groups = parse_groups(args.group)
 
@@ -152,8 +153,8 @@ def main() -> None:
     }
     assert settings.llm_api_key, "LLM_API_KEY not set"
 
-    msg_rows = [r for r in rows if r.get("job") == "message"]
-    ask_rows = [r for r in rows if r.get("job") == "ask"]
+    msg_rows = [r for r in rows if r.get("job") == "message" and args.jobs in ("all", "message")]
+    ask_rows = [r for r in rows if r.get("job") == "ask" and args.jobs in ("all", "ask")]
     results: dict[str, list[tuple[str, Result]]] = {s: [] for s in SYSTEMS}
     lat, toks, detail = [], [0, 0], []
     for r in msg_rows:

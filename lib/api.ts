@@ -54,6 +54,39 @@ export interface Notice {
   amount_cents: number | null;
 }
 
+export type RequestStatus = "WAITING" | "APPROVED" | "DECLINED" | "ANSWERED";
+
+/** What the buyer sent and where it stands (P4 D17); summary written by code, not the model. */
+export interface BuyerRequest {
+  id: number;
+  kind: string;
+  summary: string;
+  status: RequestStatus;
+  created_at: string | null;
+}
+
+/** POST /ask (P4 D10). `looked_up` = cited records that exist ("Looked up" trace). */
+export interface AskResult {
+  answer: string;
+  cited_records: string[];
+  looked_up: string[];
+  confidence: "low" | "med" | "high";
+  fallback: boolean;
+  proposal_id: number | null;
+}
+
+/** POST /message (P4 D10). `checks` are code-written ("$20.00 ≤ price $1,420.00"). */
+export interface MessageResult {
+  received: boolean;
+  label: string | null;
+  summary: string;
+  checks: string[];
+  proposal_id: number | null;
+  proposal_ids: number[];
+  answer: string | null;
+  fallback: boolean;
+}
+
 export interface Statement {
   buyer: { name: string };
   supplier: { name: string };
@@ -66,6 +99,7 @@ export interface Statement {
   credit_cents: number;
   notices: Notice[];
   pending_proposals: number;
+  requests: BuyerRequest[];
   demo_login: { email: string; password: string } | null;
 }
 
@@ -165,4 +199,8 @@ export const api = {
     call<Receipt>(`/statement/${enc(token)}/payments/${paymentId}`),
   refresh: (token: string, paymentId: number) =>
     call<Receipt>(`/statement/${enc(token)}/payments/${paymentId}/refresh`, post({})),
+  ask: (token: string, question: string) =>
+    call<AskResult>(`/statement/${enc(token)}/ask`, post({ question })),
+  message: (token: string, text: string) =>
+    call<MessageResult>(`/statement/${enc(token)}/message`, post({ text })),
 };
