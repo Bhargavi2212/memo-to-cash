@@ -200,11 +200,11 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | POST | `/supplier/import` | admin | multipart CSV → `{created, updated, errors:[{row, msg}], mirrored, mirror_errors:[{invoice_no, msg}]}` |
 | POST | `/supplier/sync/{invoice_id}` | admin | → refreshed invoice from PayPal |
 | POST | `/paypal/webhook` | paypal | PayPal event → 200 always after storing; processes idempotently |
-| GET | `/statement/{token}/payments/{id}` | public | → `Receipt` (for the receipt page) |
+| GET | `/statement/{token}/payments/{id}` | public | → `Receipt` (for the receipt page; CAPTURED / CAPTURE_PENDING / RECORDED off-PayPal payments — P3 A9) |
 | POST | `/statement/{token}/payments/{id}/refresh` | public | → re-runs `resolve_recording` for that payment's RECORDING/FAILED allocations (P2 R4) → `Receipt` |
 | GET | `/config` | public | → `{paypal_client_id, demo_mode}` — loads the PayPal JS SDK at runtime (P2 D12) |
 | GET | `/supplier/buyers/{id}` | admin/demo | → buyer, memos, invoices, messages, proposals, payments, statement link |
-| POST | `/supplier/payments/record` | admin/demo | `{buyer_id, client_uid, method: CHECK|WIRE_TRANSFER|OTHER, reference, amount_cents, invoice_ids?, received_on?}` (P3 A9; `client_uid` makes it idempotent) → payment + allocations |
+| POST | `/supplier/payments/record` | admin/demo | `{buyer_id, client_uid, method: CHECK|WIRE_TRANSFER|OTHER, reference, amount_cents, invoice_ids?, received_on?}` (P3 A9; `client_uid` makes it idempotent — same uid for another buyer → 409 `CLIENT_UID_REUSED`; `received_on` in the future → 422 `DATE_IN_FUTURE`; split errors as `/preview`) → `{payment_id, source: OFF_PAYPAL, status: RECORDED, method, reference, amount_cents, received_at, allocations, repeat}`; recorded on each PayPal invoice afterwards with the same method/date and `[MTC:<uid>] Cheque <reference>` |
 | GET | `/demo/whoami` | demo cookie | → `{statement_token \| null}` — the cookie's own ready copy; the "See it as Demo Diamond Co." link shows only on that copy (P3 A10, G13) |
 | POST | `/demo/start` | public (DEMO_MODE, ≤ 15 per IP per hour, ≤ 60 per hour overall) | → creates a fresh demo buyer from the seed (invoice numbers suffixed `-<6 chars>`), mirrors to PayPal, sets demo cookie → `{statement_token, buyer_id, ms}` |
 

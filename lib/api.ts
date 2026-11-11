@@ -120,7 +120,7 @@ export interface ReceiptAllocation {
 
 export interface Receipt {
   payment_id: number;
-  status: "CAPTURED" | "CAPTURE_PENDING";
+  status: "CAPTURED" | "CAPTURE_PENDING" | "RECORDED";
   paypal_capture_id: string | null;
   amount_cents: number;
   received_at: string | null;

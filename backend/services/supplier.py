@@ -362,3 +362,28 @@ def whoami(session: Session, settings: Settings, cookie: str | None) -> str | No
         .where(Buyer.demo_session == sess, Buyer.demo_ready.is_(True))
         .order_by(Buyer.id.desc())
     ).first()
+
+
+def payment_summary(session: Session, payment_id: int) -> dict[str, Any]:
+    """A payment and its split, as the record modal's confirmation shows it."""
+    p = session.get(Payment, payment_id)
+    assert p is not None
+    rows = session.execute(
+        select(Allocation, Invoice.erp_invoice_no)
+        .join(Invoice, Allocation.invoice_id == Invoice.id)
+        .where(Allocation.payment_id == p.id)
+        .order_by(Allocation.id)
+    ).all()
+    return {
+        "payment_id": p.id,
+        "source": p.source,
+        "status": p.status,
+        "method": p.method,
+        "reference": p.reference,
+        "amount_cents": p.amount_cents,
+        "received_at": ny_date(p.received_at) if p.received_at else None,
+        "allocations": [
+            {"invoice_no": no, "amount_cents": a.amount_cents, "record_state": a.record_state}
+            for a, no in rows
+        ],
+    }

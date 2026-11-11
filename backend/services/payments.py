@@ -13,15 +13,17 @@ Money rules (CLAUDE.md invariants 2, 3, 4, 9):
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from backend.core.dates import NY, ny_date, today_ny
 from backend.core.money import to_cents
 from backend.core.split import OpenInvoice, SplitError, resolve_request, split_payment
 from backend.db.models import Allocation, Invoice, Memo, Payment
@@ -441,7 +443,27 @@ class _Job:
     uid: str
     paypal_invoice_id: str | None
     amount_cents: int
-    capture_id: str | None
+    method: str  # PAYPAL for statement payments; CHECK / WIRE_TRANSFER / OTHER off PayPal
+    payment_date: Any  # date the money arrived (None → today)
+    note: str  # after the [MTC:<uid>] token
+
+
+METHOD_WORD = {"CHECK": "Cheque", "WIRE_TRANSFER": "Wire", "OTHER": "Payment"}
+RECORDABLE = ("CAPTURED", "RECORDED")  # statement payments + off-PayPal payments (P3 A9, R3)
+
+
+def _job_for(p: Payment, a: Allocation, paypal_invoice_id: str | None) -> _Job:
+    """The recording job is built from the payment row (P3 R3): a statement payment records
+    as PAYPAL today; an off-PayPal one with its own method, date and reference."""
+    if p.source == "OFF_PAYPAL":
+        method = p.method or "OTHER"
+        word = METHOD_WORD.get(method, "Payment")
+        note = f"{word} {p.reference}".strip() if p.reference else word
+        when = ny_date(p.received_at) if p.received_at else None
+    else:
+        method, when = "PAYPAL", None
+        note = f"Statement payment · PayPal capture {p.paypal_capture_id}"
+    return _Job(a.id, str(a.uid), paypal_invoice_id, a.amount_cents, method, when, note)
 
 
 @dataclass
@@ -459,7 +481,7 @@ def _mark_recording(
     PayPal call (invariant 10, R13)."""
     with session_factory() as s, s.begin():
         p = s.get(Payment, payment_id)
-        if p is None or p.status != "CAPTURED":
+        if p is None or p.status not in RECORDABLE:
             return []
         lock_buyer(s, p.buyer_id)
         allocs = s.scalars(
@@ -479,15 +501,7 @@ def _mark_recording(
             a.record_state = "RECORDING"
             a.record_started_at = now
             a.attempts += 1
-            jobs.append(
-                _Job(
-                    a.id,
-                    str(a.uid),
-                    invoice_of.get(a.invoice_id),
-                    a.amount_cents,
-                    p.paypal_capture_id,
-                )
-            )
+            jobs.append(_job_for(p, a, invoice_of.get(a.invoice_id)))
         return jobs
 
 
@@ -510,9 +524,9 @@ async def _record_one(pp: PayPal, job: _Job, today: Any, resolve: bool) -> _Resu
             job.paypal_invoice_id,
             allocation_uid=job.uid,
             amount_cents=job.amount_cents,
-            method="PAYPAL",
-            payment_date=today,
-            note=f"{token} Statement payment · PayPal capture {job.capture_id}",
+            method=job.method,
+            payment_date=job.payment_date or today,
+            note=f"{token} {job.note}",
         )
         out.transaction_id, out.done = rec.get("payment_id"), True
         try:
@@ -617,7 +631,7 @@ async def resolve_recording(
     def mark() -> list[_Job]:
         with session_factory() as s, s.begin():
             p = s.get(Payment, payment_id)
-            if p is None or p.status != "CAPTURED":
+            if p is None or p.status not in RECORDABLE:
                 return []
             lock_buyer(s, p.buyer_id)
             allocs = s.scalars(
@@ -643,15 +657,7 @@ async def resolve_recording(
                 a.record_state = "RECORDING"
                 a.record_started_at = now
                 a.attempts += 1
-                out.append(
-                    _Job(
-                        a.id,
-                        str(a.uid),
-                        invoice_of.get(a.invoice_id),
-                        a.amount_cents,
-                        p.paypal_capture_id,
-                    )
-                )
+                out.append(_job_for(p, a, invoice_of.get(a.invoice_id)))
             return out
 
     jobs = await run_in_threadpool(mark)
@@ -659,3 +665,73 @@ async def resolve_recording(
         return
     results = await _run(pp, jobs, resolve=True)
     await run_in_threadpool(_write_results, session_factory, payment_id, jobs, results)
+
+
+# ---------------------------------------------------------------- off-PayPal (P3 A9, FR-14)
+
+OFF_PAYPAL_METHODS = ("CHECK", "WIRE_TRANSFER", "OTHER")
+
+
+class RecordError(Exception):
+    def __init__(self, status: int, code: str, message: str):
+        super().__init__(message)
+        self.status, self.code, self.message = status, code, message
+
+
+def record_off_paypal(
+    session_factory: Callable[[], Session],
+    *,
+    buyer_id: int,
+    client_uid: uuid.UUID,
+    method: str,
+    reference: str,
+    amount_cents: int | None,
+    invoice_ids: list[int] | None,
+    received_on: date | None,
+) -> tuple[int, bool]:
+    """A cheque / wire / Zelle the supplier received: the same split rule as the statement
+    (`resolve_request` + `split_payment`) under the buyer lock → payment OFF_PAYPAL / RECORDED +
+    PENDING allocations, `paid_cents` raised, one transaction. The caller then runs
+    `record_allocations` (method + date + `[MTC:<uid>] Cheque <ref>` on each PayPal invoice).
+
+    Idempotent (R3, G8): `client_uid` becomes `payments.uid`; the same uid again for the same
+    buyer returns that payment (`repeat=True`); for another buyer → 409. Returns (id, repeat)."""
+    if method not in OFF_PAYPAL_METHODS:
+        raise RecordError(422, "BAD_METHOD", "method must be CHECK, WIRE_TRANSFER or OTHER")
+    today = today_ny()
+    when = received_on or today
+    if when > today:
+        raise RecordError(422, "DATE_IN_FUTURE", "The payment date can't be in the future")
+    with session_factory() as s, s.begin():
+        lock_buyer(s, buyer_id)
+        existing = s.scalars(select(Payment).where(Payment.uid == client_uid)).first()
+        if existing is not None:
+            if existing.buyer_id != buyer_id:
+                raise RecordError(409, "CLIENT_UID_REUSED", "That request id belongs elsewhere")
+            return existing.id, True
+        rows, open_ = open_invoices(s, buyer_id)
+        amount, selected = resolve_request(open_, invoice_ids, amount_cents)
+        split = split_payment(amount, open_, selected)
+        p = Payment(
+            uid=client_uid,
+            buyer_id=buyer_id,
+            source="OFF_PAYPAL",
+            status="RECORDED",
+            method=method,
+            reference=(reference or "").strip()[:100] or None,
+            amount_cents=amount,
+            # noon New York on that day, so ny_date() gives the same day back (G9)
+            received_at=datetime.combine(when, time(12), tzinfo=NY),
+        )
+        s.add(p)
+        s.flush()
+        by_id = {i.id: i for i in rows}
+        for inv_id, cents in split:
+            s.add(Allocation(payment_id=p.id, invoice_id=inv_id, amount_cents=cents))
+            inv = by_id[inv_id]
+            inv.paid_cents += cents
+            inv.ledger_status = _ledger_status(inv)
+        audit.log(s, "supplier", "payment.recorded", ref=str(p.uid),
+                  detail={"payment_id": p.id, "method": method, "amount_cents": amount,
+                          "split": [[i, c] for i, c in split]})  # fmt: skip
+        return p.id, False

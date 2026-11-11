@@ -411,7 +411,7 @@ class ReceiptAllocation(BaseModel):
 
 class Receipt(BaseModel):
     payment_id: int
-    status: str  # CAPTURED | CAPTURE_PENDING
+    status: str  # CAPTURED | CAPTURE_PENDING | RECORDED (off-PayPal, P3 A9)
     paypal_capture_id: str | None
     amount_cents: int
     received_at: date | None
@@ -422,10 +422,15 @@ class Receipt(BaseModel):
 
 
 def get_receipt(session: Session, token: str, payment_id: int) -> Receipt:
-    """Scoped to the token's buyer; only payments that reached PayPal capture have one."""
+    """Scoped to the token's buyer; payments that reached PayPal capture, and off-PayPal
+    payments the supplier recorded (P3 A9 — so `/refresh` retries their recording, R3)."""
     buyer = find_buyer(session, token)
     p = session.get(Payment, payment_id)
-    if p is None or p.buyer_id != buyer.id or p.status not in ("CAPTURED", "CAPTURE_PENDING"):
+    if (
+        p is None
+        or p.buyer_id != buyer.id
+        or p.status not in ("CAPTURED", "CAPTURE_PENDING", "RECORDED")
+    ):
         raise StatementNotFoundError
     rows, _ = open_invoices(session, buyer.id)
     by_id = {i.id: i for i in rows}

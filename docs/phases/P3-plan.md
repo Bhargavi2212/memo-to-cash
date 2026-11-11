@@ -100,3 +100,4 @@ Everything in a1–a5 and b0–b4 runs locally with fakes (fake PayPal, fake LLM
 | # | What happened | Effect |
 |---|---|---|
 | B1 | a1–a2 built. a2 changed two P4 behaviours on purpose: approve with no mode on a paid invoice is now a CREDIT (P3 A6/G4; explicit APPLY still 409 — test updated), and non-ADJUSTMENT approvals go to DONE (A8; RETURN_CHECK needs a reply text in P3a). Credit rule `services/credit.py::credit_from` is pure so the statement keeps its query budget (8); `buyer_credit_cents` wraps it for the agent Facts. | Docs: BACKEND_SCHEMA §2 decide row, §3 credit + requests.reply, §8 ADJUSTMENT payload/result. |
+| B2 | a3 built. The receipt lookup (also used by `/refresh`) now accepts RECORDED off-PayPal payments, so a failed cheque recording is retried by `/refresh` (R3); the receipt UI shows "updating PayPal" for RECORDED as for CAPTURED. Off-PayPal payments are stored at 12:00 New York on `received_on` (G9). | BACKEND_SCHEMA §2 record + receipt rows. |

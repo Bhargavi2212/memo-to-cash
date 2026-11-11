@@ -23,7 +23,7 @@ type Load =
   | { kind: "ready"; receipt: ReceiptData };
 
 const unsettled = (r: ReceiptData) =>
-  r.status === "CAPTURED" && r.allocations.some((a) => !a.recorded && a.record_state !== "FAILED");
+  (r.status === "CAPTURED" || r.status === "RECORDED") && r.allocations.some((a) => !a.recorded && a.record_state !== "FAILED");
 
 export function ReceiptSkeleton() {
   return <div aria-busy="true" className="h-64 animate-pulse rounded-card bg-line" />;
