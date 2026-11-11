@@ -29,3 +29,33 @@ def test_resolves(phrase, today, expected):
 @pytest.mark.parametrize("phrase", ["in 91 days", "someday", "", None, "the 32nd", "asap"])
 def test_unreadable_or_too_far_is_none(phrase):
     assert dates.resolve(phrase, date(2026, 11, 10)) is None
+
+
+# ---------- post-held-out code fix: abbreviations (P4 B15) ----------
+WED = date(2026, 11, 11)  # a Wednesday
+
+
+@pytest.mark.parametrize(
+    ("phrase", "rule", "expected"),
+    [
+        ("end of nxt week", "next-week:FRI", date(2026, 11, 20)),  # held-out h16's phrase
+        ("nxt wk", "next-week:FRI", date(2026, 11, 20)),
+        ("next wk", "next-week:FRI", date(2026, 11, 20)),
+        ("tmrw", "+1d", date(2026, 11, 12)),
+        ("tmr", "+1d", date(2026, 11, 12)),
+        ("2moro", "+1d", date(2026, 11, 12)),
+        ("tdy", "+0d", WED),
+        ("thr", "next:THU", date(2026, 11, 12)),
+        ("thurs", "next:THU", date(2026, 11, 12)),
+        ("weds", "next:WED", WED),
+        ("frid", "next:FRI", date(2026, 11, 13)),
+        ("by fri.", "next:FRI", date(2026, 11, 13)),
+    ],
+)
+def test_abbreviations(phrase, rule, expected):
+    assert dates.resolve(phrase, WED) == (rule, expected)
+
+
+@pytest.mark.parametrize("phrase", ["nextweekend", "wknd", "tmrwland", "frisbee", "thrice"])
+def test_abbreviations_only_match_whole_words(phrase):
+    assert dates.resolve(phrase, WED) is None

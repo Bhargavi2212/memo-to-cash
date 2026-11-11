@@ -166,3 +166,18 @@ def test_two_calls_share_one_budget():
 def test_ping_and_list_models_are_unchanged():
     assert llm.TIMEOUT_S == 8.0 and llm.PING_MAX_TOKENS == 400  # Y2
     assert callable(llm.ping) and callable(llm.list_models)
+
+
+def test_llm_key_never_reaches_logs_or_results(monkeypatch, caplog):
+    """P4 §6: an error that carries the key (e.g. echoed by a proxy) is logged by type only."""
+    import logging
+
+    key = "LLM_key-should-never-leak"
+    monkeypatch.setattr(settings, "llm_api_key", SecretStr(key))
+    caplog.set_level(logging.DEBUG)
+    res, _ = run("triage", RuntimeError(f"401 for key {key}"))
+    assert res.fallback == "error"
+    assert key not in caplog.text and key not in repr(res)
+    res2 = asyncio.run(llm.acall("answer", FACTS, "hi", llm.Budget(1.0), client=Fake(
+        RuntimeError(f"bad key {key}"))))  # fmt: skip
+    assert key not in caplog.text and key not in repr(res2)

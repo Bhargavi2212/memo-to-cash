@@ -66,3 +66,68 @@ def test_job_a_grounding_normalises_money_and_days():
     assert grounded(row, short) == (False, ["invoice:INV-1051", "25 days", "R-311"])
     fb = AnswerOutcome("I'm not sure", fallback_reason="validator")
     assert grounded(row, fb) == (False, ["(fallback)"])
+
+
+# ---------- step 6: full runner (R11, Z1, Z3) ----------
+
+FIXTURE = __import__("pathlib").Path(__file__).parents[1] / "fixtures" / "eval"
+
+
+def test_dry_replay_reproduces_the_committed_report():
+    """What CI runs (`--dry`): stored outputs → the same table, no LLM."""
+    from eval.run_eval import load, report
+
+    text = report(*load(FIXTURE / "dry_small.jsonl"))
+    assert text == (FIXTURE / "dry_small.md").read_text(encoding="utf-8").rstrip("\n")
+    assert "| agent (fixture-model) | 2 · 3 /4 (min 2, max 3) | 4 · 3 /4" in text
+    assert "1/8 (12.5 %)" in text  # the cut-off rate across passes
+    assert "{'validator': 1}" in text and "money figure 120000" in text
+
+
+def test_guard_and_fallback_catches_are_counted_not_model_passes():
+    s = score([
+        res("a", "OTHER", "REPLY", "DEDUCTION_REQUEST", "REPLY"),  # guard caught a wrong label
+        res("b", "DISPUTE", "REPLY", "OTHER", "REPLY", fallback="length"),  # fallback caught
+        res("c", "QUESTION", "ANSWER", "QUESTION", "ANSWER"),
+    ])  # fmt: skip
+    assert (s["model"], s["system"], s["guard_catches"], s["fallback_catches"]) == (1, 3, 1, 1)
+
+
+def test_fields_match_normalises():
+    from eval.run_eval import fields_match
+
+    assert fields_match({"sku": "S-104", "amount_cents": 5000},
+                        {"sku": "s-104 ", "amount_cents": 5000, "reason": "x"})  # fmt: skip
+    assert fields_match({"skus": ["S-123", "S-121"]}, {"skus": ["s-121", "S-123"]})
+    assert fields_match({"invoice_no": "INV-1038"}, {"invoice_no": "1038"})
+    assert fields_match({"date": "Friday"}, {"date": "friday"})
+    assert not fields_match({"sku": "S-104"}, {"sku": "S-110"})
+    assert fields_match({}, {"sku": "S-104"})  # nothing expected
+    assert fields_match({"reason": "scratch"}, {"reason": "chip"})  # free text not scored
+
+
+def test_budget_guard_stops_before_passing_the_cap():
+    from eval.run_eval import BudgetStop, Spend
+
+    s = Spend(usd_in=1000.0, usd_out=1000.0, cap=10.0)  # $1 per 1k tokens: worst call $7.60
+    s.check()
+    s.add((1000, 500))  # $1.50: 1.50 + 7.60 worst case ≤ 10 → still allowed
+    s.check()
+    s.add((1000, 500))  # $3.00 spent
+    with pytest.raises(BudgetStop):
+        s.check()  # 3.00 + 7.60 worst case > 10
+    cheap = Spend(usd_in=0.1, usd_out=0.1, cap=10.0)
+    for _ in range(100):
+        cheap.check()
+        cheap.add((6000, 1600))
+    assert cheap.spent < 10.0
+
+
+def test_real_run_refuses_without_prices(monkeypatch):
+    import sys
+
+    from eval import run_eval
+
+    monkeypatch.setattr(sys, "argv", ["run_eval", "--passes", "1"])
+    with pytest.raises(SystemExit, match="usd-in"):
+        run_eval.main()
