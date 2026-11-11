@@ -84,6 +84,21 @@ def proposal_list(
     return [c.model_dump() for c in svc.proposal_cards(session, scope, wanted)]
 
 
+@router.get("/payments/{payment_id}")
+def payment(
+    payment_id: int,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Any:
+    try:
+        return svc.payment_detail(session, _scope(request, session, settings), payment_id)
+    except svc.ScopeError as e:
+        return _error(e.status, e.code, e.message)
+    except svc.NotFoundError:
+        return _error(404, *NOT_FOUND)
+
+
 class DecideIn(BaseModel):
     decision: Literal["APPROVE", "REJECT"]
     mode: Literal["APPLY", "CREDIT", "SPLIT"] | None = None  # None → decided under the lock (A6)

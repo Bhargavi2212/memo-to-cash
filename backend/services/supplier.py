@@ -12,14 +12,23 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.agent.facts import proposal_sku
 from backend.agent.triage import summary
 from backend.core.config import Settings
 from backend.core.dates import NY, ny_date
-from backend.db.models import Allocation, Buyer, Invoice, InvoiceLine, Message, Payment, Proposal
+from backend.db.models import (
+    Allocation,
+    AuditLog,
+    Buyer,
+    Invoice,
+    InvoiceLine,
+    Message,
+    Payment,
+    Proposal,
+)
 from backend.services import demo
 from backend.services import statement as stmt
 
@@ -386,4 +395,75 @@ def payment_summary(session: Session, payment_id: int) -> dict[str, Any]:
             {"invoice_no": no, "amount_cents": a.amount_cents, "record_state": a.record_state}
             for a, no in rows
         ],
+    }
+
+
+# ---------------------------------------------------------------- payment detail (A4)
+
+
+def payment_detail(session: Session, scope: Scope, payment_id: int) -> dict[str, Any]:
+    """A payment, its split with the stored PayPal values and the audit timeline (A4, P3a).
+    No PayPal call here — the live fetch is P3b; our amounts are never overwritten."""
+    p = session.get(Payment, payment_id)
+    if p is None:
+        raise NotFoundError
+    b = buyer_in_scope(session, scope, p.buyer_id)
+    rows = session.execute(
+        select(Allocation, Invoice)
+        .join(Invoice, Allocation.invoice_id == Invoice.id)
+        .where(Allocation.payment_id == p.id)
+        .order_by(Allocation.id)
+    ).all()
+    alloc_uids = [str(a.uid) for a, _ in rows]
+    events = session.scalars(
+        select(AuditLog)
+        .where(
+            or_(
+                AuditLog.ref.in_([str(p.uid), *alloc_uids]),
+                AuditLog.detail["payment_id"].as_integer() == p.id,
+            )
+        )
+        .order_by(AuditLog.at, AuditLog.id)
+    )
+    no_of = {str(a.uid): inv.erp_invoice_no for a, inv in rows}
+    timeline = [
+        {
+            "at": e.at,
+            "actor": e.actor,
+            "action": e.action,
+            "invoice_no": no_of.get(e.ref or ""),
+        }
+        for e in events
+    ]
+    return {
+        "payment": {
+            "id": p.id,
+            "source": p.source,
+            "status": p.status,
+            "method": p.method,
+            "reference": p.reference,
+            "amount_cents": p.amount_cents,
+            "unapplied_cents": p.unapplied_cents,
+            "received_at": ny_date(p.received_at) if p.received_at else None,
+            "paypal_order_id": p.paypal_order_id,
+            "paypal_capture_id": p.paypal_capture_id,
+        },
+        "buyer": {"id": b.id, "name": b.name},
+        "allocations": [
+            {
+                "invoice_id": inv.id,
+                "invoice_no": inv.erp_invoice_no,
+                "amount_cents": a.amount_cents,
+                "record_state": a.record_state,
+                "paypal_transaction_id": a.paypal_transaction_id,
+                "error": a.paypal_record_error,
+                "paypal_status": inv.paypal_status,
+                "paypal_due_cents": inv.paypal_due_cents,
+                "paypal_synced_at": inv.paypal_synced_at,
+                "mismatch": inv.mismatch,
+                "paypal_url": inv.payer_view_url,
+            }
+            for a, inv in rows
+        ],
+        "timeline": timeline,
     }

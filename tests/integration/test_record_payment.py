@@ -135,3 +135,30 @@ def test_admin_can_record_for_a_demo_copy(clients, db):
                json={"buyer_id": bid, "client_uid": str(uuid.uuid4()), "method": "OTHER",
                      "reference": "Zelle 5521", "amount_cents": 10000})  # fmt: skip
     assert r.status_code == 200 and r.json()["method"] == "OTHER"
+
+
+# ---------- P3a step a4: payment detail (A4, G11) ----------
+
+
+def test_payment_detail_shows_split_stored_paypal_values_and_timeline(clients, db, fake):
+    a, b = clients
+    bid = start(a, "9.9.9.1")["buyer_id"]
+    pid = record(a, bid, amount_cents=400000).json()["payment_id"]  # INV-1038 + part of 1042
+    calls = list(fake.ops())
+    r = a.get(f"/api/supplier/payments/{pid}")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert fake.ops() == calls  # stored values only — no PayPal call (live fetch is P3b)
+    assert d["payment"]["source"] == "OFF_PAYPAL" and d["payment"]["method"] == "CHECK"
+    assert d["buyer"]["id"] == bid
+    split = [(x["invoice_no"], x["amount_cents"], x["record_state"]) for x in d["allocations"]]
+    assert split == [("INV-1038", 350000, "RECORDED"), ("INV-1042", 50000, "RECORDED")]
+    assert all(x["paypal_transaction_id"] and x["paypal_url"] for x in d["allocations"])
+    first = d["allocations"][0]
+    assert first["paypal_status"] == "MARKED_AS_PAID" and first["paypal_due_cents"] == 0
+    steps = [(e["action"], e["invoice_no"]) for e in d["timeline"]]
+    assert steps == [("payment.recorded", None), ("allocation.recorded", "INV-1038"),
+                     ("allocation.recorded", "INV-1042")]  # fmt: skip
+    start(b, "9.9.9.2")
+    assert b.get(f"/api/supplier/payments/{pid}").status_code == 404  # another visitor
+    assert a.get("/api/supplier/payments/999999").status_code == 404
