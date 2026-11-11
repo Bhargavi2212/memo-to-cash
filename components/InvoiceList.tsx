@@ -42,7 +42,7 @@ export function InvoiceList({
           <li
             key={inv.id}
             id={`invoice-${inv.invoice_no}`}
-            className={`transition-colors ${focus === `invoice-${inv.invoice_no}` ? "bg-accent/10" : ""}`}
+            className={`transition-colors ${focus === `invoice-${inv.invoice_no}` ? "bg-accent/10 ring-2 ring-inset ring-accent" : ""}`}
           >
             <label
               className={`flex min-h-11 items-start gap-3 px-4 py-3 ${open ? "cursor-pointer" : "opacity-70"}`}

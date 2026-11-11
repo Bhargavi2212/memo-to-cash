@@ -39,13 +39,16 @@ export function Statement() {
   const [reload, setReload] = useState(0); // bump to refetch ("Try again", statement changed)
   const [focus, setFocus] = useState<string | null>(null); // record chip target (P4 D14)
 
-  // a record chip was clicked: scroll to it (the memo opens itself), highlight ~2.5 s
+  // a record chip was clicked: scroll to it (the memo opens itself) and highlight it. Invoices
+  // sit far above the Ask box, so the smooth scroll takes ~1–2 s: hold their highlight 4 s so
+  // it stays visible ≥ 1.5 s after arriving (lines are closer: 2.5 s).
   useEffect(() => {
     if (!focus) return;
     const frame = requestAnimationFrame(() =>
       document.getElementById(focus)?.scrollIntoView({ behavior: "smooth", block: "center" }),
     );
-    const timer = setTimeout(() => setFocus(null), 2500);
+    const hold = focus.startsWith("invoice-") ? 4000 : 2500;
+    const timer = setTimeout(() => setFocus(null), hold);
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
@@ -129,6 +132,18 @@ export function Statement() {
             Credit <span className="tabular">{formatCents(s.credit_cents)}</span>
           </p>
         )}
+        <a
+          href="#ask"
+          onClick={(e) => {
+            // the AI is visible without scrolling past the payment section
+            e.preventDefault();
+            document.getElementById("ask")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            document.getElementById("ask-input")?.focus({ preventScroll: true });
+          }}
+          className="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-accent underline-offset-4 hover:underline"
+        >
+          Ask about this statement →
+        </a>
       </header>
 
       {changed && (

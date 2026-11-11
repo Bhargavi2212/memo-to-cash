@@ -52,8 +52,9 @@ export function AskBox({
   const busy = state.kind === "loading";
   return (
     <section
+      id="ask"
       aria-labelledby="ask-h"
-      className="rounded-card border border-line bg-surface p-4"
+      className="scroll-mt-4 rounded-card border border-line bg-surface p-4"
     >
       <h2 id="ask-h" className="text-lg font-semibold">
         Ask about this statement
