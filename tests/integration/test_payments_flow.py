@@ -676,3 +676,52 @@ async def test_statement_lists_payments_notices_and_credit(db, api, fake, buyer,
     credited = next(n for n in s["notices"] if n["kind"] == "PAYMENT_CREDITED")
     assert credited["amount_cents"] == 2500
     assert s["credit_cents"] == 2500 and s["owed_cents"] == 0
+
+
+# ======================================== live-run fixes (dates in New York, receipt "as of")
+
+
+def pay_via_api(api, fake, buyer, amount):
+    oid = post_order(api, buyer, amount_cents=amount)
+    fake.approve(oid)
+    r = api.post(base(buyer) + "/capture", json={"paypal_order_id": oid})
+    assert r.status_code == 200, r.text
+    return r.json()["payment_id"]
+
+
+async def test_dates_are_new_york_dates(db, api, fake, buyer, settings):
+    """Invariant 8: a capture at 23:30 ET is that New York day, not the next UTC day."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    await mirrored(buyer, fake, settings)
+    pid = pay_via_api(api, fake, buyer, 100000)
+    late = datetime(2026, 3, 9, 23, 30, tzinfo=ZoneInfo("America/New_York"))  # 03:30 UTC Mar 10
+    p = db.get(Payment, pid)
+    p.received_at = late
+    db.commit()
+    assert api.get(base(buyer) + f"/payments/{pid}").json()["received_at"] == "2026-03-09"
+    listed = api.get(base(buyer)).json()["payments"]
+    assert [x["received_at"] for x in listed if x["id"] == pid] == ["2026-03-09"]
+
+
+async def test_receipt_shows_balances_right_after_that_payment(db, api, fake, buyer, settings):
+    """Receipt 1 keeps showing INV-1042 $2,000 left after a later payment clears it."""
+    await mirrored(buyer, fake, settings)
+    first = pay_via_api(api, fake, buyer, 500000)
+    second = pay_via_api(api, fake, buyer, 342000)
+
+    r1 = api.get(base(buyer) + f"/payments/{first}").json()
+    assert {a["invoice_no"]: a["due_after_cents"] for a in r1["allocations"]} == {
+        "INV-1038": 0,
+        "INV-1042": 200000,
+    }
+    assert r1["new_owed_cents"] == 342000
+
+    r2 = api.get(base(buyer) + f"/payments/{second}").json()
+    assert {a["invoice_no"]: a["due_after_cents"] for a in r2["allocations"]} == {
+        "INV-1042": 0,
+        "INV-1051": 0,
+    }
+    assert r2["new_owed_cents"] == 0
+    assert api.get(base(buyer)).json()["owed_cents"] == 0

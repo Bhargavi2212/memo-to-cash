@@ -7,14 +7,14 @@ One query per table — no N+1.
 
 import hashlib
 import logging
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.core.config import Settings
-from backend.core.dates import age_days, days_overdue
+from backend.core.dates import age_days, days_overdue, ny_date
 from backend.core.split import OpenInvoice, resolve_request, split_payment
 from backend.db.models import (
     Allocation,
@@ -251,8 +251,8 @@ def get_statement(session: Session, token: str, today: date, settings: Settings)
     pay_out, notices = [], []
     since = today - timedelta(days=NOTICE_DAYS)
     for p in payments:
-        recent = p.updated_at.date() >= since
-        at = p.updated_at.date()
+        at = ny_date(p.updated_at)  # New York dates on every buyer screen (invariant 8)
+        recent = at >= since
         if p.status in LISTED:
             pay_out.append(
                 PaymentOut(
@@ -262,7 +262,7 @@ def get_statement(session: Session, token: str, today: date, settings: Settings)
                     method=p.method,
                     reference=p.reference,
                     amount_cents=p.amount_cents,
-                    received_at=p.received_at.date() if p.received_at else None,
+                    received_at=ny_date(p.received_at) if p.received_at else None,
                     applied=[
                         Applied(
                             invoice_no=inv_no.get(a.invoice_id, ""), amount_cents=a.amount_cents
@@ -376,24 +376,43 @@ def get_receipt(session: Session, token: str, payment_id: int) -> Receipt:
     )
     planned = {(int(x["invoice_id"]), int(x["amount_cents"])) for x in p.planned_split or []}
     actual = {(a.invoice_id, a.amount_cents) for a in allocs}
+
+    # Balances "as of" this payment: only allocations of payments received up to and including
+    # it (ordered by received_at, then id) — a later payment must not change an old receipt.
+    def key(pay: Payment) -> tuple[datetime, int]:
+        return (pay.received_at or datetime.max.replace(tzinfo=UTC), pay.id)
+
+    mine = key(p)
+    paid_upto: dict[int, int] = {}
+    for a, pay in session.execute(
+        select(Allocation, Payment)
+        .join(Payment, Allocation.payment_id == Payment.id)
+        .where(Payment.buyer_id == buyer.id)
+    ):
+        if key(pay) <= mine:
+            paid_upto[a.invoice_id] = paid_upto.get(a.invoice_id, 0) + a.amount_cents
+
+    def due_after(inv: Invoice) -> int:
+        return max(0, inv.total_cents - paid_upto.get(inv.id, 0))
+
     return Receipt(
         payment_id=p.id,
         status=p.status,
         paypal_capture_id=p.paypal_capture_id,
         amount_cents=p.amount_cents,
-        received_at=p.received_at.date() if p.received_at else None,
+        received_at=ny_date(p.received_at) if p.received_at else None,
         allocations=[
             ReceiptAllocation(
                 invoice_no=by_id[a.invoice_id].erp_invoice_no,
                 amount_cents=a.amount_cents,
                 recorded=a.record_state == "RECORDED",
                 record_state=a.record_state,
-                due_after_cents=by_id[a.invoice_id].total_cents - by_id[a.invoice_id].paid_cents,
+                due_after_cents=due_after(by_id[a.invoice_id]),
                 paypal_url=by_id[a.invoice_id].payer_view_url,
             )
             for a in allocs
         ],
-        new_owed_cents=sum(max(0, i.total_cents - i.paid_cents) for i in rows),
+        new_owed_cents=sum(due_after(i) for i in rows),
         credit_cents=p.unapplied_cents,
         resplit=bool(allocs) and actual != planned,
     )

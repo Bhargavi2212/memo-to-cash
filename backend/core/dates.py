@@ -27,3 +27,11 @@ def age_days(issued_on: date, today: date) -> int:
 def days_overdue(due_on: date, today: date) -> int:
     """0 on or before the due date."""
     return max(0, (today - due_on).days)
+
+
+def ny_date(moment: datetime) -> date:
+    """The New York calendar date of a stored timestamp (invariant 8): a payment at 23:30 ET
+    is that day, not the next UTC day."""
+    if moment.tzinfo is None:
+        raise ValueError("timestamp must be timezone-aware")
+    return moment.astimezone(NY).date()
