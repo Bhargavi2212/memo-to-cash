@@ -77,7 +77,7 @@ def test_answer_ok_and_per_call_model_override():
     res, fake = run("answer", resp(json.dumps(ANSWER_OK)), model="muse-spark-1.3")
     assert res.ok and res.data.cited_records == ["memo_line:S-102", "return:R-311"]
     assert res.model == "muse-spark-1.3" and fake.calls[0]["model"] == "muse-spark-1.3"
-    assert res.prompt_version == "answer-v0"
+    assert res.prompt_version == "answer-v1"
     assert settings.llm_model != "muse-spark-1.3"  # no global mutation (D20)
 
 
