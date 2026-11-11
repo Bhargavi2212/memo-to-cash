@@ -183,7 +183,15 @@ def test_paid_elsewhere_on_paypal_is_a_recorded_mismatch(api, db, fake, copy):
     assert inv.mismatch == "PayPal due 130000 ≠ ours 140000 (cents)"
 
 
+def test_demo_cookie_decides_its_own_copy(api, db, copy):
+    """P3 A1: the visitor's demo cookie (set by /demo/start) may decide its own proposals."""
+    assert api.cookies.get("mtc_demo")
+    r = decide(api, copy["proposal"], headers={})
+    assert r.status_code == 200 and r.json()["status"] == "DONE"
+
+
 def test_admin_only(api, db, copy, settings):
+    api.cookies.clear()  # no demo cookie: only the admin token works
     assert decide(api, copy["proposal"], headers={}).status_code == 401
     assert (
         decide(api, copy["proposal"], headers={"Authorization": "Bearer nope"}).status_code == 401

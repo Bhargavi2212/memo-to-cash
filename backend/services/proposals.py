@@ -50,9 +50,11 @@ def snapshot(p: Proposal) -> dict[str, Any]:
     }
 
 
-def _load(s: Session, proposal_id: int) -> Proposal:
+def _load(s: Session, proposal_id: int, buyer_ids: frozenset[int] | None = None) -> Proposal:
+    """`buyer_ids` = the caller's scope (P3 A1): None = admin (any id), else only those buyers;
+    anything else is "not found" — no existence leak."""
     p = s.get(Proposal, proposal_id)
-    if p is None:
+    if p is None or (buyer_ids is not None and p.buyer_id not in buyer_ids):
         raise ProposalError(404, "NOT_FOUND", "No such proposal")
     s.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": p.buyer_id})
     s.refresh(p)  # re-read under the lock
@@ -60,11 +62,14 @@ def _load(s: Session, proposal_id: int) -> Proposal:
 
 
 def _apply(
-    sf: Callable[[], Session], proposal_id: int, decision: str
+    sf: Callable[[], Session],
+    proposal_id: int,
+    decision: str,
+    buyer_ids: frozenset[int] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """The ledger part. Returns (proposal snapshot, the PayPal job or None)."""
     with sf() as s, s.begin():
-        p = _load(s, proposal_id)
+        p = _load(s, proposal_id, buyer_ids)
         now = datetime.now(UTC)
         if decision == "REJECT":
             if p.status != "PENDING":
@@ -148,11 +153,15 @@ def _finish(
 
 
 async def decide(
-    sf: Callable[[], Session], pp: PayPal, proposal_id: int, decision: str
+    sf: Callable[[], Session],
+    pp: PayPal,
+    proposal_id: int,
+    decision: str,
+    buyer_ids: frozenset[int] | None = None,
 ) -> dict[str, Any]:
     if decision not in ("APPROVE", "REJECT"):
         raise ProposalError(422, "BAD_DECISION", "decision must be APPROVE or REJECT")
-    snap, job = await run_in_threadpool(_apply, sf, proposal_id, decision)
+    snap, job = await run_in_threadpool(_apply, sf, proposal_id, decision, buyer_ids)
     if job is None:
         return snap
     body: dict[str, Any] | None = None
