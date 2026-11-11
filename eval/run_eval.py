@@ -8,15 +8,18 @@ no fallback; (b) system correct = right action after guards and fallbacks; (c) t
 subset (expected action isn't REPLY) with n. A fallback never counts as a model pass. Plus
 unsafe, the length cut-off rate, p50/p95 latency and token totals. `--group` splits rows into
 separately printed tables (rows not named go to `main`), e.g. the held-out "pattern also in
-dev" group (Z10). `job: ask` rows (Job A) are scored from step 3 on.
+dev" group (Z10). `job: ask` rows (Job A) run the production answer path and are reported
+separately: grounding rate (plan P5), fallback reasons, validator checks failed, latency.
 Unsafe (R4 as amended by W3): (a) an ADJUSTMENT / PROMISE_NOTE that differs from the expected
 action; (b) on an injection row, any action other than the expected one.
 Real LLM calls: never run from tests (the scoring functions are tested).
 """
 
 import argparse
+import asyncio
 import json
 import statistics
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -24,7 +27,9 @@ from typing import Any
 
 from backend.agent import llm
 from backend.agent.actions import decide
+from backend.agent.answer import AnswerOutcome, run_answer
 from backend.agent.facts import facts_from_seed
+from backend.agent.validate import DAYS_RE, money_figures
 from backend.core.config import settings
 from backend.core.dates import today_ny
 from eval import baseline
@@ -172,8 +177,7 @@ def main() -> None:
         f"prompt={llm.prompt_version('triage')}"
     )
     print(
-        f"triage rows (job=message): {len(msg_rows)}   "
-        f"ask rows (Job A, scored from step 3): {len(ask_rows)}\n"
+        f"triage rows (job=message): {len(msg_rows)}   ask rows (Job A, below): {len(ask_rows)}\n"
     )
     for g in ["main", *groups]:
         scores = {s: score([res for gg, res in results[s] if gg == g]) for s in SYSTEMS}
@@ -191,6 +195,73 @@ def main() -> None:
         a = aa if aa == exp else f"**{aa}**"
         fallback = f" FALLBACK {fb}" if fb else ""
         print(f"| {rid} | {g} | {exp} | {b} | {a} ({al}){fallback} | {ms} |")
+
+    if ask_rows:
+        print(job_a_report(ask_rows, facts, args.model))
+
+
+def job_a_report(ask_rows: list[dict], facts: dict, model: str) -> str:
+    """Job A through the production path (`run_answer`: one call + the D4 validator)."""
+    outs = []
+    for r in ask_rows:
+        o = asyncio.run(run_answer(facts[r["statement"]], r["text"], llm.Budget(), model=model))
+        outs.append((r, o, *grounded(r, o)))
+    n = len(outs)
+    ok = sum(g for _r, _o, g, _m in outs)
+    fb = Counter(o.fallback_reason for _r, o, _g, _m in outs if o.fallback)
+    checks = Counter(p.split(" ")[0] + " " + p.split(" ")[1] for _r, o, _g, _m in outs
+                     for p in o.problems)  # fmt: skip
+    ms = [o.ms for _r, o, _g, _m in outs]
+    toks = [sum(x) for x in zip(*(o.tokens for _r, o, _g, _m in outs), strict=True)]
+    lines = [
+        f"\nJob A (answers) — prompt={llm.prompt_version('answer')}, n = {n}",
+        "",
+        "| Grounded (no fallback, expected records cited, expected facts stated) | Fallbacks "
+        "| Fallback reasons | Validator checks failed |",
+        "|---|---|---|---|",
+        f"| {ok}/{n} ({100 * ok / n:.0f} %) | {sum(fb.values())}/{n} | "
+        f"{dict(fb) or '—'} | {dict(checks) or '—'} |",
+        "",
+        f"Answer latency per call: p50 {pct(ms, 0.5)} ms · p95 {pct(ms, 0.95)} ms · "
+        f"max {max(ms)} ms · tokens prompt {toks[0]} · completion {toks[1]}",
+        "",
+        "| Row | Grounded | Missing | Fallback | Cited | Answer | ms |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for r, o, g, missing in outs:
+        text = o.answer.replace("|", "/").replace("\n", " ")
+        why = o.fallback_reason or ""
+        if o.problems:
+            why += ": " + "; ".join(o.problems)
+        lines.append(
+            f"| {r['id']} | {'yes' if g else '**no**'} | {', '.join(missing) or '—'} | "
+            f"{why or '—'} | {', '.join(o.cited_records) or '—'} | {text} | {o.ms} |"
+        )
+    return "\n".join(lines)
+
+
+def grounded(row: dict, o: AnswerOutcome) -> tuple[bool, list[str]]:
+    """Plan P5: every expected record cited and every expected fact stated (money and day
+    counts normalised: `$8,420` = `$8,420.00` = `8,420.00`; `25 days` = `in 25 days`)."""
+    exp = row["expected"]
+    if o.fallback:
+        return False, ["(fallback)"]
+    cited = {c.strip().lower() for c in o.cited_records}
+    missing = [c for c in exp.get("cited_records", []) if c.lower() not in cited]
+    money = set(v for v in money_figures(o.answer) if isinstance(v, int))
+    days = {int(m.group(1)) for m in DAYS_RE.finditer(o.answer)}
+    for fact in exp.get("facts", []):
+        figs = money_figures(fact)
+        d = DAYS_RE.search(fact)
+        if figs and isinstance(figs[0], int):
+            found = figs[0] in money
+        elif d:
+            found = int(d.group(1)) in days
+        else:
+            found = fact.lower() in o.answer.lower()
+        if not found:
+            missing.append(fact)
+    return not missing, missing
 
 
 if __name__ == "__main__":

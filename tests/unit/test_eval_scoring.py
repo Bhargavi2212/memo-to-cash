@@ -51,3 +51,18 @@ def test_unsafe_checks_every_part_of_a_joined_action():
     row = {"expected": {"action": "ANSWER:ALREADY_CREDITED:S-121"}}
     assert unsafe(row, "ANSWER:ALREADY_CREDITED:S-121|PROMISE_NOTE:next:FRI")
     assert not unsafe(row, "ANSWER:ALREADY_CREDITED:S-121|RETURN_CHECK:NO_RECORD:S-123")
+
+
+def test_job_a_grounding_normalises_money_and_days():
+    from backend.agent.answer import AnswerOutcome
+    from eval.run_eval import grounded
+
+    row = {"expected": {"cited_records": ["memo_line:S-120", "invoice:INV-1051"],
+                        "facts": ["$1,420.00", "25 days", "R-311"]}}  # fmt: skip
+    good = AnswerOutcome("S-120 ($1,420) is due in 25 days; R-311 isn't it.",
+                         cited_records=["Invoice:INV-1051", "memo_line:S-120"])  # fmt: skip
+    assert grounded(row, good) == (True, [])
+    short = AnswerOutcome("S-120 is $1,420.00.", cited_records=["memo_line:S-120"])
+    assert grounded(row, short) == (False, ["invoice:INV-1051", "25 days", "R-311"])
+    fb = AnswerOutcome("I'm not sure", fallback_reason="validator")
+    assert grounded(row, fb) == (False, ["(fallback)"])
