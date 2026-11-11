@@ -191,11 +191,11 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | POST | `/statement/{token}/preview` | public | `{invoice_ids?: [], amount_cents?}` → `{allocations:[{invoice_no, amount_cents}], total_cents}` / 422 |
 | POST | `/statement/{token}/order` | public | same as preview → `{paypal_order_id}` |
 | POST | `/statement/{token}/capture` | public | `{paypal_order_id}` → `Receipt` |
-| POST | `/statement/{token}/ask` | public | `{question}` → `AnswerResult` |
-| POST | `/statement/{token}/message` | public | `{text}` → `{received: true, proposal_id?}` |
+| POST | `/statement/{token}/ask` | public | `{question}` (1–500 chars) → `{answer, cited_records, looked_up, confidence, fallback, proposal_id?}` — always 200; a fallback answer files the day's REPLY (P4 D10, G1) |
+| POST | `/statement/{token}/message` | public | `{text}` (1–2000 chars) → `{received: true, label, summary, checks, proposal_id?, proposal_ids, answer?, fallback}` — `summary`/`checks` written by code (2-decimal money); always 200 (P4 D10) |
 | GET | `/supplier/overview` | admin | → buyers with owed/overdue/age/last payment + pending proposals count |
 | GET | `/supplier/proposals?status=PENDING` | admin | → `[Proposal]` |
-| POST | `/supplier/proposals/{id}/decide` | admin | `{decision: APPROVE|REJECT, edits?}` → `Proposal` |
+| POST | `/supplier/proposals/{id}/decide` | admin (P4; demo cookie with P3a) | `{decision: APPROVE|REJECT, edits?}` → `Proposal` (`edits` → 422 until P3a). APPROVE on an ADJUSTMENT: ledger line + total under the buyer lock → PayPal invoice PUT → DONE / FAILED; invoice due < deduction → 409 `NEEDS_CREDIT` (P3a records it as credit) |
 | GET | `/supplier/payments/{id}` | admin | → payment + allocations + PayPal statuses + audit |
 | POST | `/supplier/import` | admin | multipart CSV → `{created, updated, errors:[{row, msg}], mirrored, mirror_errors:[{invoice_no, msg}]}` |
 | POST | `/supplier/sync/{invoice_id}` | admin | → refreshed invoice from PayPal |
@@ -207,7 +207,7 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | POST | `/supplier/payments/record` | admin/demo | `{buyer_id, method: CHECK|WIRE_TRANSFER|OTHER, reference, amount_cents, invoice_ids?}` → payment + allocations |
 | POST | `/demo/start` | public (DEMO_MODE, ≤ 15 per IP per hour, ≤ 60 per hour overall) | → creates a fresh demo buyer from the seed (invoice numbers suffixed `-<6 chars>`), mirrors to PayPal, sets demo cookie → `{statement_token, buyer_id, ms}` |
 
-Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknown token, 429 `RATE_LIMITED` / `DEMO_HOURLY_LIMIT`, 503 `NOT_CONFIGURED` (lists missing setting names, never values) / `PAYPAL_UNAVAILABLE` (transient: 5xx/429/timeout after retries, or the 20 s demo deadline), 502 `PAYPAL_REJECTED` (deterministic PayPal 4xx during demo start; debug_id logged), 409 `STATEMENT_CHANGED` / `PAYMENT_FAILED` / `ORDER_NOT_APPROVED` (an already-captured payment returns its existing receipt with 200), 402 `PAYMENT_DECLINED` (SDK restarts checkout), 503 `CAPTURE_UNCONFIRMED`, 422 `AMOUNT_NOT_POSITIVE` / `AMOUNT_EXCEEDS_SELECTED` / `NOTHING_SELECTED` / `INVOICE_NOT_OPEN`, 502 PayPal failure (state saved, retry shown). Full P2 list: `docs/phases/P2.md` D13.
+Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknown token, 429 `RATE_LIMITED` / `DEMO_HOURLY_LIMIT`, 503 `NOT_CONFIGURED` (lists missing setting names, never values) / `PAYPAL_UNAVAILABLE` (transient: 5xx/429/timeout after retries, or the 20 s demo deadline), 502 `PAYPAL_REJECTED` (deterministic PayPal 4xx during demo start; debug_id logged), 409 `STATEMENT_CHANGED` / `PAYMENT_FAILED` / `ORDER_NOT_APPROVED` (an already-captured payment returns its existing receipt with 200), 402 `PAYMENT_DECLINED` (SDK restarts checkout), 503 `CAPTURE_UNCONFIRMED`, 422 `AMOUNT_NOT_POSITIVE` / `AMOUNT_EXCEEDS_SELECTED` / `NOTHING_SELECTED` / `INVOICE_NOT_OPEN`, 422 `TEXT_EMPTY` / `TEXT_TOO_LONG` (ask/message), 409 `NEEDS_CREDIT` ("Invoice already paid — record it as credit instead") / `NOT_PENDING` (decide), 502 PayPal failure (state saved, retry shown). Full P2 list: `docs/phases/P2.md` D13.
 
 ## 3. Response shapes
 ```jsonc
@@ -228,6 +228,7 @@ Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknow
   "credit_cents": 0,                               // Σ unapplied_cents of this buyer's payments (shown as "Credit")
   "notices": [{"kind":"PAYMENT_VOIDED","payment_id":21,"at":"D-0"}],   // kinds: PAYMENT_VOIDED | PAYMENT_CREDITED | RECORDING_PENDING
   "pending_proposals": 1,
+  "requests": [{"id": 4, "kind": "ADJUSTMENT", "summary": "−$20.00 on INV-1051 for S-120", "status": "WAITING", "created_at": "D-0"}],   // P4 D17: newest first; summary computed from the payload; status WAITING | APPROVED | DECLINED | ANSWERED
   "demo_login": {"email": "<SANDBOX_BUYER_EMAIL>", "password": "<sandbox>"} }   // only in DEMO_MODE for demo buyers (P2 D2); invoices[].paypal_url = payer_view_url
 
 // Receipt
@@ -265,8 +266,9 @@ Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknow
 { "type":"object","required":["label","fields"],
   "properties":{ "label":{"enum":["QUESTION","RETURN_CLAIM","DEDUCTION_REQUEST","PAYMENT_PROMISE","DISPUTE","OTHER"]},
     "fields":{"type":"object","properties":{
-       "sku":{"type":["string","null"]}, "amount_cents":{"type":["integer","null"]},
+       "sku":{"type":["string","null"]}, "skus":{"type":"array","items":{"type":"string"}}, "amount_cents":{"type":["integer","null"]},
        "date":{"type":["string","null"]}, "invoice_no":{"type":["string","null"]}, "reason":{"type":["string","null"]} }} } }
+// P4: `skus` = every item a RETURN_CLAIM names (Z7); `date` = the phrase as the buyer wrote it, resolved by code. All fields are required in strict mode (nullable).
 
 // ReminderDraft
 { "type":"object","required":["text","send_after"],
@@ -291,8 +293,8 @@ Buyer key = `(buyer_email, demo_session)`; real imports have `demo_session = NUL
 **Validation errors (each → row error):** unknown `record_type`; missing required column value; bad date or price; MEMO/LINE/RETURN/INVOICE/INVOICE_LINE referring to an unknown memo or invoice; duplicate key in the file (same memo_no, same memo_no+sku, same invoice_no, same invoice_no+sku); INVOICE_LINE whose SKU has no LINE; a line on two invoices; a SKU both on an invoice and RETURNED; an invoice with zero lines; an INVOICE_LINE whose memo isn't the invoice's memo (one invoice = one memo, P1 build B5); a RETURN for a SKU with no LINE; `issued_on > due_on`; any change (lines, dates, total) to an invoice that already has a `paypal_invoice_id` (mirrored invoices are immutable).
 
 ## 7. Eval file (`eval/messages.jsonl`)
-Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATION_PLAN) loaded into a test database with D = the eval run date; `"statement":"seed"` names it.
-`{"id":"m01","statement":"seed","text":"...","expected":{"label":"RETURN_CLAIM","fields":{"sku":"S-102"},"action":"RETURN_CHECK:NO_RECORD"},"source":"real-redacted|written"}`
+Each eval row runs against the **§Seed** dataset as in-memory Facts (`facts_from_seed`, equal to the database's — tested) with D = the eval run date; `"statement"` is `"seed"` or `"seed_paid_5000"` (after a $5,000 payment). `"job"` is `"message"` (triage) or `"ask"` (Job A, with `expected.cited_records` + `expected.facts`). Actions use code rules: `ADJUSTMENT:INV-1051:-2000`, `RETURN_CHECK:NO_RECORD:S-103`, `ANSWER:ALREADY_CREDITED:S-102`, `REPLY:UNKNOWN:S-199`, `PROMISE_NOTE:next:FRI`, multi-item parts joined with `|`. Dev set = `eval/messages.jsonl` (`source: written`); held-out = `eval/heldout.jsonl` (`source: written-heldout`, written by the founder, unseen during development).
+`{"id":"m01","statement":"seed","text":"...","expected":{"label":"RETURN_CLAIM","fields":{"sku":"S-102"},"action":"RETURN_CHECK:NO_RECORD"},"source":"written|written-heldout","job":"message"}`
 
 ## 8. Rules the endpoints follow (resolved Nov 9)
 **Auth per route**
@@ -308,8 +310,9 @@ Each eval row runs against a fresh copy of the **§Seed** dataset (IMPLEMENTATIO
 **Demo copies:** every `/demo/start` (incl. "Start again") creates a **new** `demo_session` and buyer; the signed cookie `mtc_demo` (7 days, HttpOnly, Secure, SameSite=Lax) is set only after a successful start; every demo query also requires `buyers.demo_ready = true` (P1 D8, D9).
 
 **Proposal shapes** (`proposals.payload` / `proposals.evidence`)
-- ADJUSTMENT: `payload = {invoice_id, amount_cents, reason}` — `amount_cents` negative (reduces the invoice, same sign as `invoice_lines`); `evidence = {source: "seed"|"agent", checks: [...], records: [...]}`.
-- Seed (P1 D3): message `kind="MESSAGE"`, `ai_result={"seeded": true}`, audit actor `system`; one ADJUSTMENT −2000 on INV-1051. P4 replaces it with a proposal the live agent creates at demo start.
+- ADJUSTMENT: `payload = {invoice_id, amount_cents, reason, sku}` — `amount_cents` negative (reduces the invoice, same sign as `invoice_lines`); `evidence = {source: "seed"|"agent", checks: [...], records: [...], due_cents?}`. ≤ line price at triage; **≤ invoice due at approval** (else 409 `NEEDS_CREDIT`). Approval adds an `invoice_lines` row with `memo_line_id NULL` and lowers `total_cents`.
+- RETURN_CHECK (only `NO_RECORD`): `payload = {sku}`. PROMISE_NOTE: `{promise_date, amount_cents?}`. REPLY: `{reason, sku?}`; a fallback REPLY: `{fallback_day, items: [{message_id, kind, text, reason}]}` (one pending per buyer per day). `evidence.internal = true` marks guard notes the buyer never sees. A repeat of a pending deduction files nothing (the buyer is told "Already sent").
+- Seed (P1 D3): message `kind="MESSAGE"`, `ai_result={"seeded": true}`, audit actor `system`; one ADJUSTMENT −2000 on INV-1051. P4 replaces it with a proposal the live agent creates at demo start (D13: the agent's when triage gives exactly `ADJUSTMENT:INV-1051:-2000`, else this seed one; live: agent 4/4).
 - REMINDER and other kinds are defined in P3/P4 specs.
 
 **Preview / order defaults** (`/preview`, `/order`, `/supplier/payments/record`)
