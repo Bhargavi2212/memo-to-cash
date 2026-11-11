@@ -14,18 +14,29 @@ import re
 from datetime import date, timedelta
 
 WEEKDAYS = {
-    "mon": 0, "monday": 0, "tue": 1, "tues": 1, "tuesday": 1, "wed": 2, "wednesday": 2,
-    "thu": 3, "thur": 3, "thurs": 3, "thursday": 3, "fri": 4, "friday": 4,
-    "sat": 5, "saturday": 5, "sun": 6, "sunday": 6,
+    "mon": 0, "monday": 0, "tue": 1, "tues": 1, "tuesday": 1,
+    "wed": 2, "weds": 2, "wedn": 2, "wednesday": 2,
+    "thu": 3, "thr": 3, "thrs": 3, "thur": 3, "thurs": 3, "thursday": 3,
+    "fri": 4, "frid": 4, "friday": 4, "sat": 5, "saturday": 5, "sun": 6, "sunday": 6,
 }  # fmt: skip
 CODES = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 MAX_DAYS = 90
+# Buyers abbreviate ("end of nxt wk", "tmrw"). Post-held-out code fix (P4 B15): h16 "end of nxt
+# week" was labelled right by the model but this resolver couldn't read "nxt". Words only —
+# the rules above are unchanged.
+ABBREVIATIONS = {
+    "nxt": "next", "nex": "next", "wk": "week", "wks": "weeks",
+    "tmrw": "tomorrow", "tmr": "tomorrow", "tmrow": "tomorrow", "tmw": "tomorrow",
+    "tomoro": "tomorrow", "tomorow": "tomorrow", "2moro": "tomorrow", "2morrow": "tomorrow",
+    "tdy": "today", "2day": "today",
+}  # fmt: skip
+_ABBR_RE = re.compile(r"\b(" + "|".join(map(re.escape, ABBREVIATIONS)) + r")\b")
 
 
 def resolve(phrase: str | None, today: date) -> tuple[str, date] | None:
     if not phrase:
         return None
-    s = phrase.strip().lower()
+    s = _ABBR_RE.sub(lambda m: ABBREVIATIONS[m.group(1)], phrase.strip().lower())
     out: tuple[str, date] | None = None
     if re.search(r"\bnext\s+week\b", s):
         monday_next = today + timedelta(days=7 - today.weekday())
