@@ -35,6 +35,11 @@ def unknown_records(f: Facts, cited: list[str]) -> list[str]:
     return [c for c in cited if c.strip().lower() not in known]
 
 
+def day(d: date) -> str:
+    """Dates the buyer reads ("Oct 3, 2026"): the model copies them as written, never ISO."""
+    return f"{d:%b} {d.day}, {d.year}"
+
+
 def _days(n: int) -> str:
     return f"{n} day" if n == 1 else f"{n} days"
 
@@ -54,7 +59,7 @@ def _rel(f: Facts, d: date, late: str = "late") -> str:
 
 def facts_prompt(f: Facts) -> str:
     out = [
-        f"Buyer: {f.buyer_name}. Today: {f.today.isoformat()}.",
+        f"Buyer: {f.buyer_name}. Today: {day(f.today)}.",
         f"Owed now: {usd(f.owed_cents)}. Credit: {usd(f.credit_cents)}.",
         "",
         "MEMO LINES (id · description · price · status):",
@@ -63,9 +68,11 @@ def facts_prompt(f: Facts) -> str:
         if ln.status == "KEPT":
             st = f"KEPT, billed on invoice:{ln.invoice_no}"
         elif ln.status == "RETURNED" and ln.returned_on:
-            st = f"RETURNED on {ln.returned_on}, {_ago(f, ln.returned_on)} (return:{ln.return_ref})"
+            when = f"{day(ln.returned_on)}, {_ago(f, ln.returned_on)}"
+            st = f"RETURNED on {when} (return:{ln.return_ref})"
         elif ln.due_back_on:
-            st = f"OUT (still with the buyer), due back {ln.due_back_on}, {_rel(f, ln.due_back_on)}"
+            when = f"{day(ln.due_back_on)}, {_rel(f, ln.due_back_on)}"
+            st = f"OUT (still with the buyer), due back {when}"
         else:
             st = ln.status
         price = usd(ln.price_cents)
@@ -76,14 +83,14 @@ def facts_prompt(f: Facts) -> str:
         out.append(
             f"- invoice:{i.invoice_no} · memo:{i.memo_no} · total {usd(i.total_cents)} · "
             f"paid {usd(i.paid_cents)} · due {usd(i.due_cents)} · "
-            f"issued {i.issued_on}, {_ago(f, i.issued_on)} · due date {i.due_on}, {when}"
+            f"issued {day(i.issued_on)}, {_ago(f, i.issued_on)} · due date {day(i.due_on)}, {when}"
         )
     out += ["", "PAYMENTS (id · amount · date · applied):"]
     if not f.payments:
         out.append("- none")
     for p in f.payments:
         applied = ", ".join(f"{no} {usd(c)}" for no, c in p.applied)
-        out.append(f"- payment:{p.id} · {usd(p.amount_cents)} · {p.received_on} · {applied}")
+        out.append(f"- payment:{p.id} · {usd(p.amount_cents)} · {day(p.received_on)} · {applied}")
     out += [
         "",
         "REQUESTS ALREADY SENT TO THE SUPPLIER (id · kind · invoice · sku · amount · status):",
