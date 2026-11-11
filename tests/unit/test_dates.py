@@ -63,3 +63,14 @@ def test_days_overdue_zero_on_and_before_due_date():
 def test_days_overdue_seed_invoice():
     d = today_ny()
     assert days_overdue(offset(d, -18), d) == 18  # INV-1038 in the seed
+
+
+def test_ny_date_of_a_late_evening_timestamp():
+    from backend.core.dates import ny_date
+
+    late = datetime(2026, 11, 10, 23, 30, tzinfo=NY)  # 04:30 UTC on Nov 11
+    assert late.astimezone(UTC).date() == date(2026, 11, 11)
+    assert ny_date(late) == date(2026, 11, 10)
+    assert ny_date(late.astimezone(UTC)) == date(2026, 11, 10)
+    with pytest.raises(ValueError):
+        ny_date(datetime(2026, 11, 10, 23, 30))
