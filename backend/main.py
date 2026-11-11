@@ -9,7 +9,7 @@ import logging
 from fastapi import FastAPI
 
 from backend.core import logging as token_logging
-from backend.routes import config, demo, health, statement
+from backend.routes import config, demo, health, statement, supplier
 
 # PayPal/LLM code logs method, path, status, ms and debug_id — never bodies with emails or tokens.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -25,3 +25,4 @@ app.include_router(health.router)
 app.include_router(demo.router)
 app.include_router(statement.router)
 app.include_router(config.router)
+app.include_router(supplier.router)

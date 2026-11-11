@@ -5,7 +5,8 @@ token's buyer (invariant 7).
 """
 
 from collections.abc import Callable
-from typing import Annotated
+from dataclasses import asdict
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
@@ -13,12 +14,13 @@ from pydantic import BaseModel, StrictInt
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from backend.agent import llm
 from backend.core.config import Settings, get_settings
 from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import payments
+from backend.services import agent, payments
 from backend.services import statement as svc
 
 router = APIRouter(prefix="/api")
@@ -151,3 +153,76 @@ async def refresh(
         return await run_in_threadpool(_receipt, session_factory, token, payment_id)
     except svc.StatementNotFoundError:
         return _error(404, *NOT_FOUND)
+
+
+# ---------- agent: ask + message (P4 D10; FR-8, FR-9) ----------
+
+ASK_MAX, MESSAGE_MAX = 500, 2000
+
+
+class AskIn(BaseModel):
+    question: str
+
+
+class MessageIn(BaseModel):
+    text: str
+
+
+class AskOut(BaseModel):
+    answer: str
+    cited_records: list[str]
+    looked_up: list[str]
+    confidence: str
+    fallback: bool
+    proposal_id: int | None = None
+
+
+class MessageOut(BaseModel):
+    received: bool
+    label: str | None
+    summary: str
+    checks: list[str]
+    proposal_id: int | None = None
+    proposal_ids: list[int]
+    answer: str | None = None
+    fallback: bool
+
+
+def _text_error(value: str, limit: int) -> JSONResponse | None:
+    if not value.strip():
+        return _error(422, "TEXT_EMPTY", "Type a question or message first.")
+    if len(value) > limit:
+        return _error(422, "TEXT_TOO_LONG", f"Please keep it under {limit} characters.")
+    return None
+
+
+@router.post("/statement/{token}/ask", response_model=AskOut)
+async def ask(
+    token: str,
+    body: AskIn,
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+    client: Annotated[Any, Depends(llm.get_job_client)],
+):
+    if err := _text_error(body.question, ASK_MAX):
+        return err
+    try:
+        r = await agent.ask(session_factory, token, body.question.strip(), client=client)
+    except svc.StatementNotFoundError:
+        return _error(404, *NOT_FOUND)
+    return AskOut(**asdict(r))
+
+
+@router.post("/statement/{token}/message", response_model=MessageOut)
+async def message(
+    token: str,
+    body: MessageIn,
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+    client: Annotated[Any, Depends(llm.get_job_client)],
+):
+    if err := _text_error(body.text, MESSAGE_MAX):
+        return err
+    try:
+        r = await agent.message(session_factory, token, body.text.strip(), client=client)
+    except svc.StatementNotFoundError:
+        return _error(404, *NOT_FOUND)
+    return MessageOut(**asdict(r))

@@ -79,3 +79,25 @@ def test_not_ready_demo_copy_is_unreachable_everywhere(db, api):
     r = api.post(f"/api/statement/{t}/capture", json={"paypal_order_id": "X"})
     assert r.status_code == 404
     assert api.get(f"/api/statement/{t}/payments/1").status_code == 404
+
+
+def test_agent_routes_stay_inside_the_tokens_buyer(db, api):
+    """P4: /ask and /message read Facts and write proposals only for the token's buyer."""
+    from backend.agent import llm
+    from backend.db.models import Message, Proposal
+    from tests.llm_fake import FakeLLM, triage
+
+    fake = FakeLLM(triage=[triage("DEDUCTION_REQUEST", sku="S-104", amount_cents=5000)])
+    app.dependency_overrides[llm.get_job_client] = lambda: fake
+    mine, theirs = buyer(db, "mine"), buyer(db, "theirs")
+    r = api.post(f"/api/statement/{mine.statement_token}/message", json={"text": "S-104 50 off"})
+    assert r.status_code == 200
+    db.expire_all()
+    p = db.scalars(select(Proposal)).one()
+    inv = db.get(Invoice, p.payload["invoice_id"])
+    assert p.buyer_id == mine.id and inv.buyer_id == mine.id
+    assert db.scalars(select(Message.buyer_id)).all() == [mine.id]
+    assert api.get(f"/api/statement/{theirs.statement_token}").json()["requests"] == []
+    half = buyer(db, "half-built", ready=False).statement_token
+    assert api.post(f"/api/statement/{half}/ask", json={"question": "hi"}).status_code == 404
+    assert api.post(f"/api/statement/{half}/message", json={"text": "hi"}).status_code == 404

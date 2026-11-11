@@ -8,11 +8,14 @@ One query per table — no N+1.
 import hashlib
 import logging
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.agent.facts import proposal_sku
+from backend.agent.triage import summary
 from backend.core.config import Settings
 from backend.core.dates import age_days, days_overdue, ny_date
 from backend.core.split import OpenInvoice, resolve_request, split_payment
@@ -23,6 +26,7 @@ from backend.db.models import (
     InvoiceLine,
     Memo,
     MemoLine,
+    Message,
     Payment,
     Proposal,
 )
@@ -108,6 +112,52 @@ class DemoLogin(BaseModel):
     password: str
 
 
+class RequestOut(BaseModel):
+    """What the buyer sent and where it stands (P4 D17); summary computed from the payload."""
+
+    id: int
+    kind: str
+    summary: str
+    status: str  # WAITING | APPROVED | DECLINED | ANSWERED
+    created_at: date | None
+
+
+def request_status(kind: str, status: str) -> str:
+    """P4 A5: PENDING/FAILED→WAITING, APPROVED/DONE→APPROVED (REPLY+DONE→ANSWERED),
+    REJECTED→DECLINED."""
+    if status == "REJECTED":
+        return "DECLINED"
+    if status == "DONE" and kind == "REPLY":
+        return "ANSWERED"
+    return "APPROVED" if status in ("APPROVED", "DONE") else "WAITING"
+
+
+def _requests(rows: list[Any], inv_no: dict[int, str]) -> list[RequestOut]:
+    """`rows` = (Proposal, source message created_at), newest first."""
+    out = []
+    for p, at in rows:
+        pl = p.payload
+        text = summary(
+            p.kind,
+            invoice_no=inv_no.get(pl.get("invoice_id", -1)),
+            sku=proposal_sku(p),
+            amount_cents=pl.get("amount_cents"),
+            promise_date=pl.get("promise_date"),
+            reason=pl.get("reason"),
+            fallback="fallback_day" in pl,
+        )
+        out.append(
+            RequestOut(
+                id=p.id,
+                kind=p.kind,
+                summary=text,
+                status=request_status(p.kind, p.status),
+                created_at=ny_date(at) if at else None,
+            )
+        )
+    return out
+
+
 class Statement(BaseModel):
     buyer: Party
     supplier: Party
@@ -120,6 +170,7 @@ class Statement(BaseModel):
     credit_cents: int
     notices: list[Notice]
     pending_proposals: int
+    requests: list["RequestOut"] = []  # P4 D17
     demo_login: DemoLogin | None = None
 
 
@@ -203,11 +254,13 @@ def get_statement(session: Session, token: str, today: date, settings: Settings)
             .order_by(Allocation.id)
         )
     )
-    pending = session.scalar(
-        select(func.count())
-        .select_from(Proposal)
-        .where(Proposal.buyer_id == buyer.id, Proposal.status == "PENDING")
-    )
+    proposal_rows = session.execute(
+        select(Proposal, Message.created_at)
+        .outerjoin(Message, Proposal.source_message_id == Message.id)
+        .where(Proposal.buyer_id == buyer.id)
+        .order_by(Proposal.id.desc())
+    ).all()
+    pending = sum(p.status == "PENDING" for p, _at in proposal_rows)
 
     by_memo: dict[int, list[LineOut]] = {}
     memo_due_back = {m.id: m.due_back_on for m in memos}
@@ -307,7 +360,8 @@ def get_statement(session: Session, token: str, today: date, settings: Settings)
         payments=pay_out,
         credit_cents=sum(p.unapplied_cents for p in payments if p.status in LISTED),
         notices=notices,
-        pending_proposals=pending or 0,
+        pending_proposals=pending,
+        requests=_requests(proposal_rows, inv_no),
         demo_login=demo_login,
     )
 

@@ -384,7 +384,7 @@ def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportR
     for key, r in p.lines.items():
         memo_no, sku = key
         ret = p.returns.get(key)
-        status = "KEPT" if key in p.line_invoice else "RETURNED" if ret else "OUT"
+        status = line_status(key, p)
         vals = {
             "description": r.v["description"],
             "price_cents": to_cents(r.v["price"]),
@@ -456,6 +456,14 @@ def _apply(session: Session, p: _Plan, demo_session: str | None, result: ImportR
                 )
             )
     session.flush()
+
+
+def line_status(key: tuple[str, str], p: _Plan) -> str:
+    """The one rule (shared with the agent's Facts, P4 A2): on an INVOICE → KEPT, a RETURN →
+    RETURNED, otherwise OUT."""
+    if key in p.line_invoice:
+        return "KEPT"
+    return "RETURNED" if key in p.returns else "OUT"
 
 
 def _invoice_values(p: _Plan, inv_no: str) -> dict[str, Any]:
