@@ -15,9 +15,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from typing import Any
 
 from itsdangerous import BadSignature, URLSafeTimedSerializer
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -176,6 +177,7 @@ _COOKIE_SALT = "mtc-demo-v1"
 
 SEED_MESSAGE = "There's a small scratch on the S-120 solitaire, please take $20 off."
 SEED_DEDUCTION_CENTS = -2000
+SEED_ACTION = f"ADJUSTMENT:INV-1051:{SEED_DEDUCTION_CENTS}"  # the only agent result used (D13)
 
 log = logging.getLogger("demo")
 
@@ -280,8 +282,12 @@ def check_rate(session_factory: Callable[[], Session], ip_key: str, now: datetim
 
 def _create_copy(
     session_factory: Callable[[], Session], settings: Settings, demo_session: str, today: date
-) -> tuple[int, str]:
-    """Importer → seeded message + proposal, one transaction (D3). Returns (buyer id, token)."""
+) -> tuple[int, str, Any, bool]:
+    """Importer → the seed *message only*, one transaction (P4 D13). Returns (buyer id, token,
+    the buyer's Facts for the triage, whether the global LLM cap allows a call)."""
+    from backend.agent import caps
+    from backend.agent.facts import facts_for_buyer
+
     assert settings.sandbox_buyer_email
     with session_factory() as s, s.begin():
         res = import_csv(
@@ -291,54 +297,76 @@ def _create_copy(
             raise RuntimeError(f"seed import failed: {res.errors}")
         buyer = s.get(Buyer, res.buyer_ids[0])
         assert buyer is not None
-        inv = s.scalars(
-            select(Invoice).where(
-                Invoice.buyer_id == buyer.id, Invoice.erp_invoice_no == "INV-1051"
-            )
-        ).one()
-        line = s.scalars(
-            select(MemoLine)
-            .join(Memo, MemoLine.memo_id == Memo.id)
-            .where(Memo.buyer_id == buyer.id, MemoLine.sku == "S-120")
-        ).one()
-        msg = Message(
-            buyer_id=buyer.id, text=SEED_MESSAGE, kind="MESSAGE", ai_result={"seeded": True}
-        )
-        s.add(msg)
-        s.flush()
-        s.add(
-            Proposal(
-                buyer_id=buyer.id,
-                kind="ADJUSTMENT",
-                payload={
-                    "invoice_id": inv.id,
-                    "amount_cents": SEED_DEDUCTION_CENTS,
-                    "reason": "Scratch on the S-120 solitaire (buyer message)",
-                },
-                evidence={
-                    "source": "seed",
-                    "checks": [
-                        "S-120 is KEPT on INV-1051",
-                        f"deduction 2000 ≤ line price {line.price_cents}",
-                        f"deduction 2000 ≤ invoice due {inv.total_cents - inv.paid_cents}",
-                    ],
-                    "records": ["memo_line:S-120", "invoice:INV-1051", "message:seed"],
-                },
-                source_message_id=msg.id,
-            )
-        )
-        audit.log(s, "system", "proposal.seeded", ref="INV-1051", detail={"buyer_id": buyer.id})
-        return buyer.id, buyer.statement_token
+        s.add(Message(buyer_id=buyer.id, text=SEED_MESSAGE, kind="MESSAGE",
+                      ai_result={"seeded": True}))  # fmt: skip
+        allowed = caps.take_unit(s, today, None)  # demo start counts toward global only (D9)
+        return buyer.id, buyer.statement_token, facts_for_buyer(s, buyer.id, today), allowed
+
+
+def _seed_proposal(s: Session, buyer_id: int, msg: Message) -> Proposal:
+    """The P1 deterministic proposal — the fallback when the agent's triage isn't the
+    expected one (D13)."""
+    inv = s.scalars(
+        select(Invoice).where(Invoice.buyer_id == buyer_id, Invoice.erp_invoice_no == "INV-1051")
+    ).one()
+    line = s.scalars(
+        select(MemoLine)
+        .join(Memo, MemoLine.memo_id == Memo.id)
+        .where(Memo.buyer_id == buyer_id, MemoLine.sku == "S-120")
+    ).one()
+    return Proposal(
+        buyer_id=buyer_id,
+        kind="ADJUSTMENT",
+        payload={
+            "invoice_id": inv.id,
+            "amount_cents": SEED_DEDUCTION_CENTS,
+            "reason": "Scratch on the S-120 solitaire (buyer message)",
+        },
+        evidence={
+            "source": "seed",
+            "checks": [
+                "S-120 is KEPT on INV-1051",
+                f"deduction 2000 ≤ line price {line.price_cents}",
+                f"deduction 2000 ≤ invoice due {inv.total_cents - inv.paid_cents}",
+            ],
+            "records": ["memo_line:S-120", "invoice:INV-1051", "message:seed"],
+        },
+        source_message_id=msg.id,
+    )
 
 
 def _finish(
-    session_factory: Callable[[], Session], buyer_id: int, ip_key: str, now: datetime
-) -> None:
-    """Mark the copy reachable and count the start — only on success (D9, D17)."""
+    session_factory: Callable[[], Session],
+    buyer_id: int,
+    ip_key: str,
+    now: datetime,
+    tri: Any,
+) -> str:
+    """One transaction: exactly one proposal (the agent's, or the seed one), the copy marked
+    reachable, the start counted — only on success (D9, D13, D17, R2). Returns its source."""
+    from backend.services.agent import proposal_for
+
     bucket = hour_bucket(now)
     with session_factory() as s, s.begin():
+        s.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": buyer_id})
         buyer = s.get(Buyer, buyer_id)
         assert buyer is not None
+        msg = s.scalars(
+            select(Message).where(Message.buyer_id == buyer_id).order_by(Message.id)
+        ).first()
+        assert msg is not None
+        msg.ai_result = {"seeded": True, "triage": tri.ai_result()}
+        if tri.action is not None and tri.action.code == SEED_ACTION:
+            prop = proposal_for(s, buyer_id, tri.action, msg, tri.label)
+            source, actor, action = "agent", "agent", "proposal.created"
+        else:
+            prop = _seed_proposal(s, buyer_id, msg)
+            source, actor, action = "seed", "system", "proposal.seeded"
+        s.add(prop)
+        s.flush()
+        audit.log(s, actor, action, ref="INV-1051", detail={"buyer_id": buyer_id,
+                  "proposal_id": prop.id, "triage": tri.action.code if tri.action else
+                  tri.fallback_reason})  # fmt: skip
         buyer.demo_ready = True
         _bump(s, ip_key, bucket)
         total = _bump(s, "global", bucket)
@@ -347,6 +375,19 @@ def _finish(
         )
     if total >= WARN_AT:
         log.warning("demo starts this hour: %d of %d", total, GLOBAL_PER_HOUR)
+    if source == "seed":
+        log.info("demo start used the seed proposal (triage %s)",
+                 tri.action.code if tri.action else tri.fallback_reason)  # fmt: skip
+    return source
+
+
+async def _triage(facts: Any, allowed: bool, client: Any) -> Any:
+    from backend.agent import llm
+    from backend.agent.triage import TriageOutcome, run_triage
+
+    if not allowed:
+        return TriageOutcome(None, {}, None, "cap")
+    return await run_triage(facts, SEED_MESSAGE, llm.Budget(), client=client)
 
 
 async def start_demo(
@@ -356,6 +397,7 @@ async def start_demo(
     *,
     ip: str,
     now: datetime | None = None,
+    client: Any = None,
 ) -> DemoStart:
     """A fresh, private demo copy: seed → PayPal invoices → ready (FR-12).
 
@@ -370,21 +412,29 @@ async def start_demo(
     await run_in_threadpool(check_rate, session_factory, ip_key, when)
 
     demo_session = secrets.token_urlsafe(16)
-    buyer_id, token = await run_in_threadpool(
+    buyer_id, token, facts, allowed = await run_in_threadpool(
         _create_copy, session_factory, settings, demo_session, today_ny(when)
     )
+    # D13: the seed message goes through the real triage while PayPal mirrors the invoices
+    triage_task = asyncio.create_task(_triage(facts, allowed, client))
     try:
         result = await asyncio.wait_for(
             mirror_invoices(buyer_id, pp, settings, session_factory, today=today_ny(when)),
             timeout=DEADLINE_S,
         )
     except TimeoutError as e:
+        await _drop(triage_task)
         raise DemoError(503, "PAYPAL_UNAVAILABLE", UNAVAILABLE_MSG) from e
     except PayPalNotConfiguredError as e:
+        await _drop(triage_task)
         raise DemoError(
             503, "NOT_CONFIGURED", "Demo isn't configured: " + ", ".join(e.missing)
         ) from e
+    except BaseException:
+        await _drop(triage_task)
+        raise
     if not result.ok:
+        await _drop(triage_task)  # mirror failed: the triage result is discarded (D13)
         if result.transient:
             raise DemoError(503, "PAYPAL_UNAVAILABLE", UNAVAILABLE_MSG)
         _, err = result.errors[0]
@@ -395,7 +445,8 @@ async def start_demo(
             "Demo setup failed on our side — we've logged it.",
             debug_id=err.debug_id,
         )
-    await run_in_threadpool(_finish, session_factory, buyer_id, ip_key, when)
+    tri = await triage_task
+    await run_in_threadpool(_finish, session_factory, buyer_id, ip_key, when, tri)
     return DemoStart(
         statement_token=token,
         buyer_id=buyer_id,
@@ -403,6 +454,11 @@ async def start_demo(
         cookie=make_demo_cookie(demo_session, settings),
         demo_session=demo_session,
     )
+
+
+async def _drop(task: "asyncio.Task[Any]") -> None:
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
 
 
 UNAVAILABLE_MSG = "PayPal's sandbox is slow right now — please try again in a minute."

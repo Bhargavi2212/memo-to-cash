@@ -17,9 +17,9 @@ from backend.db.models import AuditLog, Buyer, Invoice, LlmUsage, Message, Propo
 from backend.db.session import SessionLocal
 from backend.main import app
 from backend.services import agent as agent_svc
-from backend.services import demo
 from backend.services.demo import build_csv
 from backend.services.importer import import_csv
+from tests.demo_copy import demo_copy as make_demo_copy
 from tests.llm_fake import FakeLLM, answer, triage
 
 D = today_ny()
@@ -56,7 +56,7 @@ def plain_copy(db) -> Buyer:
 
 def demo_copy(db) -> Buyer:
     """A demo copy as /demo/start writes it, incl. the seeded S-120 request."""
-    bid, _ = demo._create_copy(SessionLocal, settings(), "sess-agent", D)
+    bid, _ = make_demo_copy(settings(), "sess-agent", D)
     b = db.get(Buyer, bid)
     b.demo_ready = True
     db.commit()

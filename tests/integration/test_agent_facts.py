@@ -11,9 +11,8 @@ from backend.core.config import load_settings
 from backend.core.dates import today_ny
 from backend.core.split import split_payment
 from backend.db.models import Allocation, Buyer, Payment
-from backend.db.session import SessionLocal
-from backend.services import demo
 from backend.services.statement import open_invoices
+from tests.demo_copy import demo_copy
 
 D = today_ny()
 BUYER_EMAIL = "sb-buyer@personal.example.com"
@@ -32,7 +31,7 @@ def settings():
 @pytest.fixture
 def buyer_id(db):
     """A demo copy exactly as /demo/start writes it: seed import + seeded message + proposal."""
-    bid, _token = demo._create_copy(SessionLocal, settings(), "sess-facts", D)
+    bid, _token = demo_copy(settings(), "sess-facts", D)
     return bid
 
 
@@ -66,7 +65,7 @@ def test_prompt_from_db_has_no_email_token_or_password(db, buyer_id):
 
 
 def test_other_buyers_records_never_leak(db, buyer_id):
-    other, _ = demo._create_copy(SessionLocal, settings(), "sess-other", D)
+    other, _ = demo_copy(settings(), "sess-other", D)
     mine = facts_for_buyer(db, buyer_id, D)
     assert facts_for_buyer(db, other, D) == mine  # same seed, separate rows
     assert len(mine.invoices) == 3 and len(mine.proposals) == 1

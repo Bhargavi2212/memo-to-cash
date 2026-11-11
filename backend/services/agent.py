@@ -129,7 +129,7 @@ async def ask(
                      out.fallback, pid)  # fmt: skip
 
 
-def _proposal_for(s: Session, buyer_id: int, part: Action, msg: Message, label: str) -> Proposal:
+def proposal_for(s: Session, buyer_id: int, part: Action, msg: Message, label: str) -> Proposal:
     if part.kind == "ADJUSTMENT":
         inv_id = s.scalars(
             select(Invoice.id).where(
@@ -202,7 +202,7 @@ def _store_message(
                     if txt := answer_text(part, fresh):
                         answers.append(txt)
                     continue
-                p = _proposal_for(s, buyer_id, part, msg, tri.label)
+                p = proposal_for(s, buyer_id, part, msg, tri.label)
                 s.add(p)
                 s.flush()
                 audit.log(s, "agent", "proposal.created", ref=str(p.id),

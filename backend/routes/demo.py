@@ -4,13 +4,14 @@ HTTP only: the work is in services/demo.py. Public route, DEMO_MODE only.
 """
 
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.agent import llm
 from backend.core.config import Settings, get_settings
 from backend.db.session import get_session_factory
 from backend.paypal.client import PayPal, get_paypal
@@ -38,6 +39,7 @@ async def demo_start(
     settings: Annotated[Settings, Depends(get_settings)],
     pp: Annotated[PayPal, Depends(get_paypal)],
     session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+    client: Annotated[Any, Depends(llm.get_job_client)],
 ):
     if not settings.demo_mode:
         return _error(404, "NOT_FOUND", "Not found")
@@ -45,7 +47,7 @@ async def demo_start(
         request.headers.get("x-forwarded-for"), request.client.host if request.client else None
     )
     try:
-        started = await demo.start_demo(settings, pp, session_factory, ip=ip)
+        started = await demo.start_demo(settings, pp, session_factory, ip=ip, client=client)
     except demo.DemoError as e:
         return _error(e.status, e.code, e.message, e.debug_id)
     resp = JSONResponse(

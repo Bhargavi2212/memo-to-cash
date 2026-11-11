@@ -6,19 +6,33 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
+import openai
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
+from backend.agent import llm
 from backend.core.config import get_settings, load_settings
 from backend.core.dates import days_overdue, today_ny
-from backend.db.models import AuditLog, Buyer, DemoRate, Invoice, MemoLine, Message, Proposal
+from backend.db.models import (
+    AuditLog,
+    Buyer,
+    DemoRate,
+    Invoice,
+    LlmUsage,
+    MemoLine,
+    Message,
+    Proposal,
+)
 from backend.main import app
 from backend.paypal import client as ppclient
 from backend.paypal.client import PayPal, get_paypal
 from backend.services import demo
+from tests.llm_fake import FakeLLM, triage
 from tests.paypal_fake import FakePayPal, error
+
+SEED_TRIAGE = triage("DEDUCTION_REQUEST", sku="S-120", amount_cents=2000, reason="scratch")
 
 SANDBOX_BUYER = "sb-buyer@personal.example.com"
 COOKIE_SECRET = "cookie-secret-should-never-leak"
@@ -61,9 +75,15 @@ def settings():
 
 
 @pytest.fixture
-def client(db, fake, settings):
+def fake_llm():
+    return FakeLLM(triage=[SEED_TRIAGE])
+
+
+@pytest.fixture
+def client(db, fake, settings, fake_llm):
     """`db` makes these Postgres tests (schema + truncate); the app uses its own sessions."""
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[llm.get_job_client] = lambda: fake_llm
     app.dependency_overrides[get_paypal] = lambda: PayPal(settings, transport=fake.transport())
     with TestClient(app, base_url="https://testserver") as c:  # https so the Secure cookie sticks
         yield c
@@ -108,18 +128,23 @@ def test_start_creates_a_ready_private_copy(client, db, settings):
     statuses = list(db.scalars(select(MemoLine.status)))
     assert (statuses.count("KEPT"), statuses.count("RETURNED"), statuses.count("OUT")) == (5, 5, 2)
 
+    # P4 D13 (A3): the seed message went through the real triage → the agent's proposal
     msg = db.scalars(select(Message).where(Message.buyer_id == buyer.id)).one()
-    assert msg.kind == "MESSAGE" and msg.ai_result == {"seeded": True} and "S-120" in msg.text
+    assert msg.kind == "MESSAGE" and "S-120" in msg.text
+    assert msg.ai_result["seeded"] is True
+    assert msg.ai_result["triage"]["action"] == "ADJUSTMENT:INV-1051:-2000"
     prop = db.scalars(select(Proposal).where(Proposal.buyer_id == buyer.id)).one()
     assert prop.kind == "ADJUSTMENT" and prop.status == "PENDING"
     assert prop.payload["invoice_id"] == invs["INV-1051"].id
     assert prop.payload["amount_cents"] == -2000 and prop.payload["reason"]
+    assert prop.payload["sku"] == "S-120"
     assert (
-        prop.evidence["source"] == "seed" and prop.evidence["checks"] and prop.evidence["records"]
+        prop.evidence["source"] == "agent" and prop.evidence["checks"] and prop.evidence["records"]
     )
     assert prop.source_message_id == msg.id
-    seeded = db.scalars(select(AuditLog).where(AuditLog.action == "proposal.seeded")).one()
-    assert seeded.actor == "system"
+    created = db.scalars(select(AuditLog).where(AuditLog.action == "proposal.created")).one()
+    assert created.actor == "agent"
+    assert db.scalar(select(LlmUsage.calls).where(LlmUsage.scope == "global")) == 1
 
     cookie = r.cookies.get(demo.COOKIE_NAME)
     assert demo.read_demo_cookie(cookie, settings) == buyer.demo_session
@@ -190,6 +215,7 @@ def assert_nothing_reachable(r, db):
     assert demo.COOKIE_NAME not in r.cookies and "set-cookie" not in r.headers
     assert db.scalar(select(func.count()).where(Buyer.demo_ready.is_(True))) == 0
     assert db.scalar(select(func.count()).select_from(DemoRate)) == 0  # not counted
+    assert db.scalar(select(func.count()).select_from(Proposal)) == 0  # triage discarded (D13)
 
 
 def test_transient_paypal_failure_is_503(client, db, fake):
@@ -270,3 +296,69 @@ def test_read_demo_cookie_rejects_tampered_and_expired(settings, monkeypatch):
     assert demo.read_demo_cookie(good, other) is None
     monkeypatch.setattr(demo, "COOKIE_MAX_AGE", -1)
     assert demo.read_demo_cookie(good, settings) is None
+
+
+# ---------- live triage at demo start (P4 D13, R2) ----------
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        openai.APITimeoutError(request=None),  # timeout
+        "not json",
+        ("length", SEED_TRIAGE),
+        triage("DEDUCTION_REQUEST", sku="S-120", amount_cents=20000),  # misread amount
+        triage("OTHER"),
+    ],
+)
+def test_seed_proposal_when_the_triage_isnt_the_expected_one(client, db, fake_llm, outcome):
+    fake_llm.script["triage"] = [outcome]
+    r = start(client)
+    assert r.status_code == 200, r.text
+    (prop,) = db.scalars(select(Proposal)).all()  # exactly one proposal per copy
+    assert prop.evidence["source"] == "seed" and prop.payload["amount_cents"] == -2000
+    seeded = db.scalars(select(AuditLog).where(AuditLog.action == "proposal.seeded")).one()
+    assert seeded.actor == "system"
+
+
+def test_over_the_global_llm_cap_uses_the_seed_without_a_call(client, db, fake_llm):
+    db.add(LlmUsage(day=today_ny(), scope="global", calls=500))
+    db.commit()
+    assert start(client).status_code == 200
+    assert fake_llm.calls == []
+    assert db.scalars(select(Proposal)).one().evidence["source"] == "seed"
+
+
+def test_two_starts_have_one_proposal_each(client, db):
+    a, b = start(client, "1.1.1.1").json(), start(client, "2.2.2.2").json()
+    for body in (a, b):
+        props = db.scalars(select(Proposal).where(Proposal.buyer_id == body["buyer_id"])).all()
+        assert [p.evidence["source"] for p in props] == ["agent"]
+
+
+def test_triage_runs_alongside_the_mirror(db, fake, settings):
+    """Total ≈ max(mirror, triage), not the sum (R2)."""
+
+    async def slow(request):
+        await asyncio.sleep(0.08)
+        return fake.handle(request)
+
+    def run(delay):
+        llm_fake = FakeLLM(triage=[SEED_TRIAGE], delay=delay)
+        app.dependency_overrides[get_settings] = lambda: settings
+        app.dependency_overrides[get_paypal] = lambda: PayPal(
+            settings, transport=httpx.MockTransport(slow)
+        )
+        app.dependency_overrides[llm.get_job_client] = lambda: llm_fake
+        try:
+            with TestClient(app, base_url="https://testserver") as c:
+                r = start(c, f"9.9.9.{int(delay * 10)}")
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 200, r.text
+        return r.json()["ms"]
+
+    mirror_only = run(0.0)
+    with_triage = run(0.6)
+    assert mirror_only > 600, mirror_only  # the slow mirror covers the triage
+    assert with_triage < mirror_only + 300, (mirror_only, with_triage)  # sequential: + 600
