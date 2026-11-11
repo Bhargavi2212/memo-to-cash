@@ -143,7 +143,7 @@ def _requests(rows: list[Any], inv_no: dict[int, str]) -> list[RequestOut]:
             sku=proposal_sku(p),
             amount_cents=pl.get("amount_cents"),
             promise_date=pl.get("promise_date"),
-            reason=pl.get("reason"),
+            reason=None if p.evidence.get("internal") else pl.get("reason"),  # guard notes
             fallback="fallback_day" in pl,
         )
         out.append(

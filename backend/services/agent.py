@@ -157,7 +157,7 @@ def _summary_of(part: Action) -> str:
         return summary("ADJUSTMENT", invoice_no=p["invoice_no"], sku=p["sku"],
                        amount_cents=p["amount_cents"]) + " — waiting for approval"  # fmt: skip
     if part.kind == "REPLY":
-        return summary("REPLY", reason=part.reason)
+        return summary("REPLY", reason=None if part.evidence.get("internal") else part.reason)
     return summary(part.kind, sku=p.get("sku"), amount_cents=p.get("amount_cents"),
                    promise_date=p.get("promise_date"))  # fmt: skip
 
@@ -201,6 +201,9 @@ def _store_message(
                 if part.kind == "ANSWER":
                     if txt := answer_text(part, fresh):
                         answers.append(txt)
+                    continue
+                if part.evidence.get("duplicate"):  # R3: told, not filed again
+                    answers.append(f"{part.reason}.")
                     continue
                 p = proposal_for(s, buyer_id, part, msg, tri.label)
                 s.add(p)
