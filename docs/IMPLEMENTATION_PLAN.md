@@ -39,6 +39,8 @@ Way of working: each phase = spec check → code → tests → commit → deploy
 **Tests:** split properties; preview defaults (BACKEND_SCHEMA §8); capture idempotency (second `/capture` on a CAPTURED payment → same receipt, 200, nothing new written); `test_concurrent_captures_serialized` (two captures for one buyer at once → second waits, never over-allocates); approved-but-closed-tab order captured by webhook/sweep; **409 STATEMENT_CHANGED** when balance changed between order and capture; `ORDER_ALREADY_CAPTURED` → finish capture; partial record failure → retry recorded once; stuck RECORDING resolved by finding `[MTC:<uid>]`.
 **Done when:** sandbox: pay $5,000 across 2 invoices → PayPal invoices show correct due amounts; receipt correct.
 
+> **Order changed Nov 10 (AI first):** P2 ✅ → **P4 core (agent + eval, `docs/phases/P4.md`)** → **P3a** (supplier overview, buyer detail, proposals approve/edit/reject incl. the paid-invoice credit case, **`put_adjustment` → PayPal invoice PUT** so AI → proposal → PayPal is complete) → **P3b** (webhooks, sweep, worker with adaptive polling, reminders/Job C, import endpoint, off-PayPal recording) → P5. Nothing is cut. Reason: Stage One judges theme fit (PayPal + AI); the agent-vs-baseline test must run ~24 h before the deadline.
+
 ## Phase P3 — Supplier side + webhooks (Tue evening)
 - [ ] Supplier overview (4.3), buyer detail, payment detail (4.4); `ADMIN_TOKEN` + demo "view as supplier"
 - [ ] Webhook route: verify signature, store, process `INVOICING.INVOICE.PAID/CANCELLED/REFUNDED`, `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.*`
