@@ -340,7 +340,10 @@ def test_triage_runs_alongside_the_mirror(db, fake, settings):
     """Total ≈ max(mirror, triage), not the sum (R2)."""
 
     async def slow(request):
-        await asyncio.sleep(0.08)
+        # Each invoice's `send` waits 0.8 s, so the mirror takes ≥ 0.8 s on any machine
+        # (CI's local Postgres made the old per-request 0.08 s mirror finish in 285 ms).
+        if request.url.path.endswith("/send"):
+            await asyncio.sleep(0.8)
         return fake.handle(request)
 
     def run(delay):
@@ -360,5 +363,5 @@ def test_triage_runs_alongside_the_mirror(db, fake, settings):
 
     mirror_only = run(0.0)
     with_triage = run(0.6)
-    assert mirror_only > 600, mirror_only  # the slow mirror covers the triage
+    assert mirror_only >= 800, mirror_only  # by construction: the mirror covers the triage
     assert with_triage < mirror_only + 300, (mirror_only, with_triage)  # sequential: + 600
