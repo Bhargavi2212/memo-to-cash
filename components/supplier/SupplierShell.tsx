@@ -82,3 +82,19 @@ export function SampleRows() {
     </>
   );
 }
+
+/** The same sample rows as stacked cards for phones (< 640 px, UI_UX §6). */
+export function SampleCards() {
+  return (
+    <>
+      {SAMPLES.map((s) => (
+        <li key={s.name} className="px-4 py-3 text-sm text-muted">
+          {s.name} <span className="text-xs">(sample — not on PayPal)</span>
+          <p className="tabular">
+            Owes {formatCents(s.owed)} · oldest {s.oldest}d
+          </p>
+        </li>
+      ))}
+    </>
+  );
+}

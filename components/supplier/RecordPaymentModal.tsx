@@ -48,7 +48,7 @@ export function RecordPaymentModal({
           setPreview(null);
           setError(e instanceof ApiError ? e.message : "Couldn't preview the split.");
         });
-    }, 300);
+    }, 200);
     return () => {
       live = false;
       clearTimeout(t);
@@ -112,11 +112,30 @@ export function RecordPaymentModal({
               Amount received ($)
               <input inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} className="mt-1 block min-h-11 w-full rounded-card border border-line px-3" />
             </label>
-            {preview && amount !== null && amount > 0 && (
-              <p className="text-muted">
-                Split, oldest due first:{" "}
-                {preview.allocations.map((a) => `${a.invoice_no} ${formatCents(a.amount_cents)}`).join(" · ")}
-              </p>
+            {amount !== null && amount > 0 && (
+              <div aria-live="polite" className="rounded-card border border-line bg-canvas p-3">
+                <p className="text-xs font-medium text-muted">Split, oldest due first</p>
+                {preview && preview.total_cents === amount ? (
+                  <ul className="mt-1 space-y-1">
+                    {preview.allocations.map((a) => {
+                      const left = preview.remaining_after.find((x) => x.invoice_no === a.invoice_no);
+                      return (
+                        <li key={a.invoice_no} className="flex justify-between gap-3">
+                          <span>{a.invoice_no}</span>
+                          <span className="tabular">
+                            {formatCents(a.amount_cents)}
+                            <span className="text-muted">
+                              {left && left.due_cents > 0 ? ` · ${formatCents(left.due_cents)} left` : " · paid in full"}
+                            </span>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  !error && <p className="mt-1 text-muted">Working out the split…</p>
+                )}
+              </div>
             )}
             {error && (
               <p role="alert" className="text-danger">

@@ -1,19 +1,30 @@
 "use client";
-// Supplier overview `/supplier` (P3 A2, A12; UI_UX §4.3): totals, buyers (+ sample rows in demo
-// mode), "Needs your decision" and recent payments with their split. Ledger only.
+// Supplier overview `/supplier` (P3 A2, A12; UI_UX §4.3, §6): totals, buyers (+ sample rows in
+// demo mode), "Needs your decision" and recent payments with their split. Ledger only.
+// A decided card stays in place with its result ("PayPal invoice INV-1051 updated: due
+// $1,400.00 · View on PayPal") — the judged moment. Tables become stacked cards below 640 px.
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, type ProposalCard as Card, type SupplierOverview } from "@/lib/api";
+import { longDate } from "@/lib/dates";
+import { paymentMethodLabel } from "@/lib/labels";
 import { formatCents } from "@/lib/money";
 
-import { ProposalCard } from "./ProposalCard";
-import { SampleRows, SupplierBanner, useSupplierData } from "./SupplierShell";
+import { type Decided, DecidedCard, ProposalCard } from "./ProposalCard";
+import { SampleCards, SampleRows, SupplierBanner, useSupplierData } from "./SupplierShell";
+
+type Buyer = SupplierOverview["buyers"][number];
+
+function oldest(b: Buyer): string {
+  return b.owed_cents > 0 ? `${b.oldest_age_days}d${b.past_due_cents > 0 ? " ⚠" : ""}` : "—";
+}
 
 export function Overview() {
   const [reload, setReload] = useState(0);
   const { data, error } = useSupplierData(api.supplier.overview, reload);
   const [demo, setDemo] = useState(false);
+  const [decided, setDecided] = useState<Card[]>([]);
   useEffect(() => {
     api
       .config()
@@ -29,7 +40,17 @@ export function Overview() {
         <div className="h-48 rounded-card bg-line" />
       </div>
     );
+
+  const onDecided = (card: Card) => (d: Decided) => {
+    // FAILED stays in the queue (Retry); anything else stays visible here with its result
+    if (d.status !== "FAILED")
+      setDecided((prev) => [{ ...card, ...d }, ...prev.filter((x) => x.id !== card.id)]);
+    setReload((n) => n + 1);
+  };
+  const shown = new Set(decided.map((c) => c.id));
+  const pending = data.pending.filter((c) => !shown.has(c.id));
   const t = data.totals;
+
   return (
     <div className="space-y-6">
       {demo && <SupplierBanner />}
@@ -39,20 +60,38 @@ export function Overview() {
           ["Past due", t.past_due_cents],
           ["Paid this week", t.paid_this_week_cents],
         ].map(([label, v]) => (
-          <div key={label as string}>
-            <p className="text-sm text-muted">{label}</p>
-            <p className="tabular text-xl font-semibold">{formatCents(v as number)}</p>
+          <div key={label as string} className="min-w-0">
+            <p className="text-xs text-muted sm:text-sm">{label}</p>
+            <p className="tabular text-base font-semibold sm:text-xl">{formatCents(v as number)}</p>
           </div>
         ))}
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-        <div className="space-y-6">
-          <section aria-labelledby="buyers-h" className="overflow-x-auto rounded-card border border-line bg-surface">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="min-w-0 space-y-6">
+          <section aria-labelledby="buyers-h" className="rounded-card border border-line bg-surface">
             <h2 id="buyers-h" className="px-4 pt-4 text-lg font-semibold">
               Buyers
             </h2>
-            <table className="mt-2 w-full text-sm">
+            {/* phone: stacked cards (UI_UX §6) */}
+            <ul className="divide-y divide-line sm:hidden">
+              {data.buyers.map((b) => (
+                <li key={b.id} className="px-4 py-3 text-sm">
+                  <Link href={`/supplier/buyers/${b.id}`} className="font-medium text-accent underline">
+                    {b.name}
+                  </Link>
+                  <p className="tabular mt-1">
+                    Owes {formatCents(b.owed_cents)} · oldest {oldest(b)}
+                  </p>
+                  <p className="text-muted">
+                    {b.out} with them · {b.kept} kept · {b.returned} returned
+                    {b.promise && ` · promised ${longDate(b.promise)}`}
+                  </p>
+                </li>
+              ))}
+              {demo && <SampleCards />}
+            </ul>
+            <table className="mt-2 hidden w-full text-sm sm:table">
               <thead className="text-left text-muted">
                 <tr>
                   <th className="px-3 py-2 font-medium">Buyer</th>
@@ -70,14 +109,16 @@ export function Overview() {
                       <Link href={`/supplier/buyers/${b.id}`} className="font-medium text-accent underline">
                         {b.name}
                       </Link>
-                      {b.promise && <span className="block text-xs text-muted">Promised {b.promise}</span>}
+                      {b.promise && (
+                        <span className="block text-xs text-muted">Promised {longDate(b.promise)}</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right">{b.out}</td>
                     <td className="px-3 py-2 text-right">{b.kept}</td>
                     <td className="px-3 py-2 text-right">{b.returned}</td>
                     <td className="tabular px-3 py-2 text-right">{formatCents(b.owed_cents)}</td>
                     <td className={`tabular px-3 py-2 text-right ${b.past_due_cents > 0 ? "text-warning" : ""}`}>
-                      {b.oldest_age_days}d{b.past_due_cents > 0 && " ⚠"}
+                      {oldest(b)}
                     </td>
                   </tr>
                 ))}
@@ -98,13 +139,13 @@ export function Overview() {
             ) : (
               <ul className="divide-y divide-line">
                 {data.recent_payments.map((p) => (
-                  <li key={p.id} className="px-4 py-3 text-sm">
+                  <li key={p.id} className="min-w-0 break-words px-4 py-3 text-sm">
                     <Link href={`/supplier/payments/${p.id}`} className="font-medium text-accent underline">
                       {formatCents(p.amount_cents)} from {p.buyer.name}
                     </Link>
                     <span className="text-muted">
                       {" "}
-                      · {p.received_at} · {p.source === "OFF_PAYPAL" ? p.method?.toLowerCase() : "PayPal"}
+                      · {longDate(p.received_at)} · {paymentMethodLabel(p.source, p.method)}
                     </span>
                     <span className="mt-1 flex flex-wrap gap-2">
                       {p.split.map((s) => (
@@ -123,15 +164,18 @@ export function Overview() {
           </section>
         </div>
 
-        <section aria-labelledby="decide-h" className="space-y-3">
+        <section aria-labelledby="decide-h" className="min-w-0 space-y-3">
           <h2 id="decide-h" className="text-lg font-semibold">
-            Needs your decision ({data.pending.length})
+            Needs your decision ({pending.length})
           </h2>
-          {data.pending.length === 0 && (
+          {decided.map((c) => (
+            <DecidedCard key={`d-${c.id}`} card={c} />
+          ))}
+          {pending.length === 0 && decided.length === 0 && (
             <p className="text-sm text-muted">Nothing waiting — you&apos;re all caught up.</p>
           )}
-          {data.pending.map((c) => (
-            <ProposalCard key={c.id} card={c} onDone={() => setReload((n) => n + 1)} />
+          {pending.map((c) => (
+            <ProposalCard key={c.id} card={c} onDone={onDecided(c)} />
           ))}
         </section>
       </div>

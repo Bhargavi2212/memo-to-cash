@@ -122,7 +122,7 @@ export function Statement() {
         <p className="mt-4 text-sm text-muted">You owe</p>
         <p className="tabular text-3xl font-semibold">{formatCents(s.owed_cents)}</p>
         <p className="mt-1 text-sm text-muted">
-          {open.length} {open.length === 1 ? "invoice" : "invoices"}
+          {open.length === 0 ? "All paid" : `${open.length} ${open.length === 1 ? "invoice" : "invoices"}`}
           {open.length > 0 && ` · oldest ${s.oldest_age_days} days`}
           {s.past_due_cents > 0 && (
             <span className="text-warning"> · {formatCents(s.past_due_cents)} past due</span>
@@ -131,6 +131,9 @@ export function Statement() {
         {s.credit_cents > 0 && (
           <p className="mt-2 text-sm">
             Credit <span className="tabular">{formatCents(s.credit_cents)}</span>
+            <span className="block text-xs text-muted">
+              {s.supplier.name} will apply it to a future invoice or refund it in PayPal.
+            </span>
           </p>
         )}
         <a

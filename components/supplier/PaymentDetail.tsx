@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import { api } from "@/lib/api";
+import { longDate } from "@/lib/dates";
+import { paymentMethodLabel, paypalStatusLabel } from "@/lib/labels";
 import { formatCents } from "@/lib/money";
 
 import { StatusChip } from "../StatusChip";
@@ -36,19 +38,38 @@ export function PaymentDetail() {
       <header className="rounded-card border border-line bg-surface p-4">
         <h1 className="tabular text-xl font-semibold">{formatCents(p.amount_cents)}</h1>
         <p className="mt-1 text-sm text-muted">
-          {p.received_at} ·{" "}
+          {longDate(p.received_at)} ·{" "}
           {p.source === "OFF_PAYPAL"
-            ? `${(p.method ?? "").toLowerCase()}${p.reference ? ` ${p.reference}` : ""}`
+            ? `${paymentMethodLabel(p.source, p.method)}${p.reference ? ` ${p.reference}` : ""}`
             : `PayPal capture ${p.paypal_capture_id ?? "—"}`}
           {p.unapplied_cents > 0 && ` · ${formatCents(p.unapplied_cents)} kept as credit`}
         </p>
       </header>
 
-      <section aria-labelledby="split-h" className="overflow-x-auto rounded-card border border-line bg-surface">
+      <section aria-labelledby="split-h" className="rounded-card border border-line bg-surface">
         <h2 id="split-h" className="px-4 pt-4 text-lg font-semibold">
           Split
         </h2>
-        <table className="mt-2 w-full text-sm">
+        <ul className="divide-y divide-line sm:hidden">
+          {d.allocations.map((a) => (
+            <li key={a.invoice_id} className="px-4 py-3 text-sm">
+              <p>
+                <span className="font-medium">{a.invoice_no}</span>{" "}
+                <span className="tabular">{formatCents(a.amount_cents)}</span>
+              </p>
+              <p className="text-muted">
+                {a.record_state === "RECORDED" ? "Recorded on PayPal" : a.record_state.toLowerCase()}
+                {a.paypal_status && ` · ${paypalStatusLabel(a.paypal_status)}`}
+              </p>
+              {a.paypal_url && (
+                <a href={a.paypal_url} target="_blank" rel="noreferrer" className="text-accent underline">
+                  View on PayPal
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+        <table className="mt-2 hidden w-full text-sm sm:table">
           <thead className="text-left text-muted">
             <tr>
               <th className="px-3 py-2 font-medium">Invoice</th>
@@ -68,7 +89,7 @@ export function PaymentDetail() {
                   </StatusChip>{" "}
                   {a.paypal_status && (
                     <span className="text-xs text-muted">
-                      {a.paypal_status}
+                      {paypalStatusLabel(a.paypal_status)}
                       {a.paypal_synced_at && ` · last synced ${new Date(a.paypal_synced_at).toLocaleString()}`}
                     </span>
                   )}
