@@ -60,7 +60,7 @@ memo-to-cash/
 │       ├── buyers/[id]/page.tsx    P3 buyer detail (copy link, record payment)
 │       ├── payments/[id]/page.tsx  P3 payment detail
 │       └── import/page.tsx         P3 ERP upload (admin only)
-├── components/                     P2 Statement · PayPanel · MemoGroup · InvoiceList · StatusChip · Notices · DemoLogin · Receipt · StartDemo — P3–P4 AskBox · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
+├── components/                     P2 Statement · PayPanel · MemoGroup · InvoiceList · StatusChip · Notices · DemoLogin · Receipt · StartDemo — P4 AskBox · MessageBox · YourRequests — P3a SeeAsSupplier · SupplierEntry · supplier/{Overview,BuyerDetail,PaymentDetail,ProposalCard,RecordPaymentModal,SupplierShell}.tsx
 ├── lib/
 │   ├── api.ts                      P2 typed API client
 │   ├── money.ts                    P2 the only money formatter

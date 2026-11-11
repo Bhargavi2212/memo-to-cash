@@ -13,6 +13,7 @@ import { MemoGroup } from "./MemoGroup";
 import { MessageBox } from "./MessageBox";
 import { Notices } from "./Notices";
 import { PayPanel } from "./PayPanel";
+import { SeeAsSupplier } from "./SeeAsSupplier";
 import { YourRequests } from "./YourRequests";
 
 type Load =
@@ -144,6 +145,9 @@ export function Statement() {
         >
           Ask about this statement →
         </a>
+        <div className="mt-2">
+          <SeeAsSupplier token={token} />
+        </div>
       </header>
 
       {changed && (

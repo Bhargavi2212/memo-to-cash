@@ -1,6 +1,7 @@
-// Landing (UI_UX §4.5, P2 D17). "Start the demo" is wired here in P2; "See the supplier side"
-// arrives with the supplier screens in P3; final copy and polish in P5.
+// Landing (UI_UX §4.5, P2 D17). "Start the demo" (P2) and "See the supplier side" (P3 A10);
+// final copy and polish in P5.
 import { StartDemo } from "@/components/StartDemo";
+import { SupplierEntry } from "@/components/SupplierEntry";
 
 export default function Home() {
   return (
@@ -13,8 +14,9 @@ export default function Home() {
       <p className="mt-6 max-w-prose text-muted">
         For goods sent on memo. Every number traces back to a memo line, a return or a payment.
       </p>
-      <div className="mt-10">
+      <div className="mt-10 space-y-4">
         <StartDemo />
+        <SupplierEntry />
       </div>
       <p className="mt-10 text-xs text-muted">
         Sandbox only — no real money moves. The PayPal sandbox buyer login is shown on the

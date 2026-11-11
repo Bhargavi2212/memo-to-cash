@@ -11,6 +11,7 @@ import { ApiError, api, type Receipt as ReceiptData } from "@/lib/api";
 import { shortDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 
+import { SeeAsSupplier } from "./SeeAsSupplier";
 import { StatusChip } from "./StatusChip";
 
 const POLL_MS = 2000;
@@ -196,7 +197,10 @@ export function Receipt() {
         )}
       </section>
 
-      {back}
+      <div className="flex flex-wrap gap-3">
+        {back}
+        <SeeAsSupplier token={token} />
+      </div>
     </div>
   );
 }
