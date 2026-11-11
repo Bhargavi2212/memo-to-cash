@@ -7,10 +7,13 @@ import { useEffect, useState } from "react";
 import { ApiError, api, type PublicConfig, type Statement as StatementData } from "@/lib/api";
 import { formatCents } from "@/lib/money";
 
+import { AskBox } from "./AskBox";
 import { InvoiceList } from "./InvoiceList";
 import { MemoGroup } from "./MemoGroup";
+import { MessageBox } from "./MessageBox";
 import { Notices } from "./Notices";
 import { PayPanel } from "./PayPanel";
+import { YourRequests } from "./YourRequests";
 
 type Load =
   | { kind: "loading" }
@@ -34,6 +37,20 @@ export function Statement() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [changed, setChanged] = useState<string | null>(null);
   const [reload, setReload] = useState(0); // bump to refetch ("Try again", statement changed)
+  const [focus, setFocus] = useState<string | null>(null); // record chip target (P4 D14)
+
+  // a record chip was clicked: scroll to it (the memo opens itself), highlight ~2.5 s
+  useEffect(() => {
+    if (!focus) return;
+    const frame = requestAnimationFrame(() =>
+      document.getElementById(focus)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    );
+    const timer = setTimeout(() => setFocus(null), 2500);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [focus]);
 
   useEffect(() => {
     let live = true;
@@ -126,7 +143,7 @@ export function Statement() {
           What you have on memo
         </h2>
         {s.memos.map((m, i) => (
-          <MemoGroup key={m.memo_no} memo={m} defaultOpen={i === 0} />
+          <MemoGroup key={m.memo_no} memo={m} defaultOpen={i === 0} focus={focus} />
         ))}
       </section>
 
@@ -134,7 +151,13 @@ export function Statement() {
         <h2 id="inv-h" className="text-lg font-semibold">
           Invoices
         </h2>
-        <InvoiceList invoices={s.invoices} selected={selected} onToggle={toggle} disabled={false} />
+        <InvoiceList
+          invoices={s.invoices}
+          selected={selected}
+          onToggle={toggle}
+          disabled={false}
+          focus={focus}
+        />
       </section>
 
       {open.length === 0 ? (
@@ -155,6 +178,14 @@ export function Statement() {
           }}
         />
       )}
+
+      <AskBox token={token} statement={s} onFocusRecord={setFocus} />
+      <MessageBox
+        token={token}
+        demoMode={config.demo_mode}
+        onSent={() => setReload((n) => n + 1)}
+      />
+      <YourRequests requests={s.requests} highlighted={focus === "requests"} />
     </div>
   );
 }

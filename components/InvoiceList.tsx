@@ -26,18 +26,24 @@ export function InvoiceList({
   selected,
   onToggle,
   disabled,
+  focus = null,
 }: {
   invoices: Invoice[];
   selected: Set<number>;
   onToggle: (id: number) => void;
   disabled: boolean;
+  focus?: string | null; // "invoice-INV-1042" from a record chip (P4 G5)
 }) {
   return (
     <ul className="divide-y divide-line rounded-card border border-line bg-surface">
       {invoices.map((inv) => {
         const open = inv.due_cents > 0;
         return (
-          <li key={inv.id}>
+          <li
+            key={inv.id}
+            id={`invoice-${inv.invoice_no}`}
+            className={`transition-colors ${focus === `invoice-${inv.invoice_no}` ? "bg-accent/10" : ""}`}
+          >
             <label
               className={`flex min-h-11 items-start gap-3 px-4 py-3 ${open ? "cursor-pointer" : "opacity-70"}`}
             >
