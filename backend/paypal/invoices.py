@@ -238,3 +238,59 @@ async def record_payment(
         # [MTC:<uid>] note on the invoice (TRD §6b-3).
         retries=0,
     )
+
+
+# ---------- approved adjustments (P4 X2 / step 5b; FR-10) ----------
+
+# CLAUDE.md §4 (proven P1 #1): GET → drop PayPal's computed fields → change items → PUT.
+# Sending stale totals gives calculation_error. PUT works on PARTIALLY_PAID (P1 open check).
+STRIP = ("amount", "due_amount", "payments", "refunds", "links", "status", "gratuity")
+
+
+def adjustment_tag(proposal_uid: str) -> str:
+    """Marks our line on the PayPal invoice, so a retried approve never adds it twice."""
+    return f"[MTC-ADJ:{proposal_uid}]"
+
+
+def adjustment_body(
+    current: dict[str, Any], *, proposal_uid: str, sku: str, amount_cents: int, reason: str
+) -> dict[str, Any] | None:
+    """The PUT body: the invoice as PayPal has it, minus computed fields, plus one negative
+    line. None when the line is already there (a retry after a lost answer)."""
+    if not isinstance(amount_cents, int) or amount_cents >= 0:
+        raise ValueError("an adjustment is a negative int of cents")
+    tag = adjustment_tag(proposal_uid)
+    items = list(current.get("items") or [])
+    if any(tag in (i.get("description") or "") for i in items):
+        return None
+    body = {k: v for k, v in current.items() if k not in STRIP}
+    label = f"Adjustment {sku}" + (f": {reason}" if reason else "")
+    items.append(
+        {
+            "name": label[:200],
+            "description": f"Approved by the supplier {tag}",
+            "quantity": "1",
+            "unit_amount": money(amount_cents),
+        }
+    )
+    body["items"] = items
+    return body
+
+
+async def put_adjustment(
+    pp: PayPal, invoice_id: str, *, proposal_uid: str, sku: str, amount_cents: int, reason: str
+) -> dict[str, Any]:
+    """Add an approved deduction line to the PayPal invoice; returns the invoice afterwards
+    (GET — PayPal answers a PUT with a link only). Idempotent via the line's tag."""
+    current = await get(pp, invoice_id)
+    body = adjustment_body(
+        current, proposal_uid=proposal_uid, sku=sku, amount_cents=amount_cents, reason=reason
+    )
+    if body is not None:
+        await pp.request(
+            "PUT",
+            f"{BASE}/{invoice_id}?send_to_recipient=false&send_to_invoicer=false",
+            json=body,
+            request_id=request_id(pp.settings, "adj", proposal_uid),
+        )
+    return await get(pp, invoice_id)

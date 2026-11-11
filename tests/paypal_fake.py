@@ -35,6 +35,11 @@ def error(status: int, name: str = "INTERNAL_SERVER_ERROR", **extra: Any) -> htt
     return httpx.Response(status, json=body, headers={"PayPal-Debug-Id": "fake-debug"})
 
 
+def _signed(value: str) -> int:
+    """PayPal money with an optional minus (adjustment lines are negative, CLAUDE.md §4)."""
+    return -to_cents(value[1:]) if value.startswith("-") else to_cents(value)
+
+
 class FakePayPal:
     def __init__(self) -> None:
         self.invoices: dict[str, dict[str, Any]] = {}
@@ -98,6 +103,8 @@ class FakePayPal:
             return ("record", path.split("/")[-2])
         if m == "GET" and path.startswith(base + "/"):
             return ("get", path.split("/")[-1])
+        if m == "PUT" and path.startswith(base + "/"):
+            return ("put", path.split("/")[-1])
         return None
 
     def add_existing(self, body: dict[str, Any], status: str = "DRAFT") -> dict[str, Any]:
@@ -207,6 +214,8 @@ class FakePayPal:
             op, key = "record", path.split("/")[-2]
         elif request.method == "GET" and path.startswith(base + "/"):
             op, key = "get", path.split("/")[-1]
+        elif request.method == "PUT" and path.startswith(base + "/"):
+            op, key = "put", path.split("/")[-1]
         else:
             return error(404, "RESOURCE_NOT_FOUND")
         self.calls.append((op, key))
@@ -237,6 +246,8 @@ class FakePayPal:
             return httpx.Response(200, json=inv)
         if op == "record":
             return self.record(key, body)
+        if op == "put":
+            return self.put(key, body, request)
         # send
         if inv["status"] == "DRAFT":
             inv["status"] = "UNPAID"
@@ -275,6 +286,26 @@ class FakePayPal:
         inv["due_amount"] = {"currency_code": "USD", "value": f"{left // 100}.{left % 100:02d}"}
         inv["status"] = "MARKED_AS_PAID" if left == 0 else "PARTIALLY_PAID"
         return httpx.Response(200, json={"payment_id": txn["payment_id"]})
+
+    def put(self, inv_id: str, body: dict[str, Any], request: httpx.Request) -> httpx.Response:
+        """Update like the sandbox (CLAUDE.md §4): computed fields sent back → calculation
+        error; PayPal recomputes amount and due; recorded payments stay; answers a link."""
+        inv = self.invoices[inv_id]
+        for field in ("amount", "due_amount", "payments", "status"):
+            if field in body:
+                return error(422, "UNPROCESSABLE_ENTITY",
+                             details=[{"issue": "CALCULATION_ERROR", "field": field}])  # fmt: skip
+        assert request.url.params.get("send_to_recipient") == "false"
+        total = sum(_signed(i["unit_amount"]["value"]) for i in body.get("items", []))
+        paid = sum(
+            to_cents(t["amount"]["value"])
+            for t in (inv.get("payments") or {}).get("transactions", [])
+        )
+        left = total - paid
+        inv.update({k: v for k, v in body.items() if k not in ("id",)})
+        inv["amount"] = {"currency_code": "USD", "value": f"{total // 100}.{total % 100:02d}"}
+        inv["due_amount"] = {"currency_code": "USD", "value": f"{left // 100}.{left % 100:02d}"}
+        return httpx.Response(200, json={"href": f"/v2/invoicing/invoices/{inv_id}", "rel": "self"})
 
     def pay_elsewhere(self, inv_id: str, amount_cents: int) -> None:
         """Someone pays this invoice on PayPal's own page (P2 D23)."""
