@@ -192,7 +192,7 @@ def facts_from_seed(today: date, paid_cents: int = 0) -> Facts:
 LISTED = {"CAPTURED", "CAPTURE_PENDING", "RECORDED"}  # the same set the statement lists
 
 
-def _proposal_sku(p: m.Proposal) -> str | None:
+def proposal_sku(p: m.Proposal) -> str | None:
     """The SKU a proposal is about: `payload.sku` (agent) or its `memo_line:` record (seed)."""
     if p.payload.get("sku"):
         return str(p.payload["sku"])
@@ -276,7 +276,7 @@ def facts_for_buyer(session: Session, buyer_id: int, today: date) -> Facts:
             id="seed" if p.evidence.get("source") == "seed" else str(p.id),
             kind=p.kind,
             invoice_no=inv_no.get(p.payload.get("invoice_id", -1)),
-            sku=_proposal_sku(p),
+            sku=proposal_sku(p),
             amount_cents=p.payload.get("amount_cents"),
             status=p.status,
         )

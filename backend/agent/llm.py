@@ -236,3 +236,8 @@ async def acall(job: str, facts: Facts, text: str, budget: Budget, **kw: Any) ->
         res = JobResult(job, kw.get("model") or settings.llm_model, prompt_version(job))
         res.ms, res.fallback = int(left * 1000), "timeout"
         return res
+
+
+def get_job_client() -> Any:
+    """FastAPI dependency: None = the real client (built per call); tests override with a fake."""
+    return None

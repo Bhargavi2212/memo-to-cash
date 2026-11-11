@@ -17,6 +17,7 @@ from typing import Any
 
 from backend.agent import dates
 from backend.agent.facts import Facts
+from backend.agent.tools import usd
 
 SKU_RE = re.compile(r"\bS-\d{3}\b", re.I)
 PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|percent\b)", re.I)
@@ -122,7 +123,10 @@ def decide(label: str, fields: dict[str, Any], text: str, facts: Facts) -> Actio
             for p in facts.proposals
         ):  # fmt: skip
             return _reply("Already sent — waiting for their approval")
-        checks = [f"{line.sku} kept on {inv.invoice_no}", f"{amount} ≤ price {line.price_cents}"]
+        checks = [
+            f"{line.sku} kept on {inv.invoice_no}",
+            f"{usd(amount)} ≤ price {usd(line.price_cents)}",
+        ]
         others = sorted({s.upper() for s in SKU_RE.findall(text or "")} - {line.sku})
         evidence: dict[str, Any] = {
             "source": "agent",

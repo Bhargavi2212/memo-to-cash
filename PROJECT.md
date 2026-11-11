@@ -74,7 +74,7 @@ memo-to-cash/
 │   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2 · logging.py P2 (statement tokens out of access logs)
 │   ├── db/         session.py P0 (+ get_session_factory P2) · models.py P1 · migrations/ (Alembic) P0–P2
 │   ├── paypal/     client.py P1 · invoices.py P1 · orders.py P2 · webhooks.py P3
-│   ├── services/   importer.py P1 · mirror.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · sync.py (sweep) P3 · proposals.py P3 · audit.py P1
+│   ├── services/   importer.py P1 · mirror.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · agent.py (ask + message) P4 · sync.py (sweep) P3 · proposals.py P3 · audit.py P1
 │   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · config.py P2 (`GET /api/config`) · supplier.py P3 · paypal_webhook.py P3
 │   └── agent/      llm.py P0 (smoke call) → P4 · facts.py · tools.py (Facts → prompt text) · actions.py (decide) · dates.py · prompts/triage.md (P4 step 0) · schemas.py · validate.py · caps.py · answer.py · triage.py · prompts/answer.md   P4
 ├── seed/
@@ -87,6 +87,7 @@ memo-to-cash/
 └── tests/
     ├── conftest.py · dbguard.py   test DB wiring (P1 D10–D12: `db` fixture, guard, schema reset)
     ├── paypal_fake.py             in-memory PayPal Invoicing (MockTransport) for mirror/demo tests
+    ├── llm_fake.py                scripted fake OpenAI client for agent tests (P4)
     ├── unit/         test_config.py · test_llm.py · test_session.py · test_dbguard.py · test_money.py · test_dates.py · test_paypal_client.py · test_invoices.py · test_orders.py · test_split.py (Hypothesis) · test_validators.py
     ├── integration/  test_health.py · test_db_smoke.py · test_schema.py · test_importer.py · test_mirror.py · test_import_api.py · test_statement_api.py · test_payments_flow.py · test_webhooks.py · test_demo.py · test_scoping.py
     └── fixtures/paypal/*.json      recorded sandbox responses (no network in tests)
