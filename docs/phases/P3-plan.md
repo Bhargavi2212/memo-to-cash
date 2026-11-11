@@ -99,3 +99,4 @@ Everything in a1–a5 and b0–b4 runs locally with fakes (fake PayPal, fake LLM
 ## 6. Build log
 | # | What happened | Effect |
 |---|---|---|
+| B1 | a1–a2 built. a2 changed two P4 behaviours on purpose: approve with no mode on a paid invoice is now a CREDIT (P3 A6/G4; explicit APPLY still 409 — test updated), and non-ADJUSTMENT approvals go to DONE (A8; RETURN_CHECK needs a reply text in P3a). Credit rule `services/credit.py::credit_from` is pure so the statement keeps its query budget (8); `buyer_credit_cents` wraps it for the agent Facts. | Docs: BACKEND_SCHEMA §2 decide row, §3 credit + requests.reply, §8 ADJUSTMENT payload/result. |

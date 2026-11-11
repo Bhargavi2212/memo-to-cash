@@ -145,32 +145,181 @@ def test_retry_after_a_lost_put_answer_doesnt_add_the_line_twice(api, db, fake, 
     assert fake.ops().count("put") == puts  # found the tag → no second PUT
 
 
-def test_needs_credit_when_the_invoice_is_already_paid(api, db, fake, copy):
-    inv = db.get(Invoice, copy["invoice"])
-    inv.paid_cents = inv.total_cents  # the judge paid the full $8,420 (P2 D20)
+# ---------- P3a a2: modes, credit, edits, replies (A6–A8, A11, R1, R5, G4, G5, G7, G23) ----------
+
+
+def act(api, pid, decision="APPROVE", headers=AUTH, **body):
+    return api.post(f"/api/supplier/proposals/{pid}/decide",
+                    json={"decision": decision, **body}, headers=headers)  # fmt: skip
+
+
+def pay_in_full(db, invoice_id):
+    """Simulate the judge paying the full $8,420 between page load and the click (P2 D20)."""
+    inv = db.get(Invoice, invoice_id)
+    inv.paid_cents = inv.total_cents
     inv.ledger_status = "PAID"
     db.commit()
+
+
+def statement(api, db, copy):
+    from backend.db.models import Buyer
+
+    token = db.get(Buyer, copy["buyer_id"]).statement_token
+    return api.get(f"/api/statement/{token}").json()
+
+
+def test_no_mode_on_a_paid_invoice_becomes_a_credit(api, db, fake, copy):
+    """G4: the mode is decided under the lock — a payment since page load never gives a 409."""
+    card = api.get("/api/supplier/proposals", headers=AUTH)  # admin lists skip demo copies…
+    assert card.json() == []
+    cards = api.get("/api/supplier/proposals").json()  # …the visitor's cookie sees it
+    assert cards[0]["suggested"] == "APPLY"  # at page load
+    pay_in_full(db, copy["invoice"])
     calls = list(fake.ops())
-    r = decide(api, copy["proposal"])
+    r = act(api, copy["proposal"])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "DONE" and body["payload"]["mode"] == "CREDIT"
+    assert body["payload"]["credit_cents"] == 2000 and body["payload"]["amount_cents"] == -2000
+    assert body["payload"]["original"]["amount_cents"] == -2000
+    assert fake.ops() == calls  # no PayPal call
+    db.expire_all()
+    assert db.get(Invoice, copy["invoice"]).total_cents == 142000  # invoice untouched
+    s = statement(api, db, copy)
+    assert s["credit_cents"] == 2000
+    (req,) = [q for q in s["requests"] if q["id"] == copy["proposal"]]
+    assert req["summary"] == "Approved as $20.00 credit on your account"
+    assert req["status"] == "APPROVED"
+    actions = [a for (a,) in db.execute(select(AuditLog.action))]
+    assert "proposal.credited" in actions
+
+
+def test_agent_facts_see_the_same_credit_as_the_statement(api, db, copy):
+    """G5: one credit helper — the agent can't quote a different credit than the page."""
+    from backend.agent.facts import facts_for_buyer
+    from backend.core.dates import today_ny
+
+    pay_in_full(db, copy["invoice"])
+    act(api, copy["proposal"])
+    db.expire_all()
+    f = facts_for_buyer(db, copy["buyer_id"], today_ny())
+    assert f.credit_cents == statement(api, db, copy)["credit_cents"] == 2000
+
+
+def test_explicit_apply_on_a_paid_invoice_is_409(api, db, fake, copy):
+    pay_in_full(db, copy["invoice"])
+    calls = list(fake.ops())
+    r = act(api, copy["proposal"], mode="APPLY")
     assert r.status_code == 409
-    assert r.json()["error"] == {
-        "code": "NEEDS_CREDIT",
-        "message": "Invoice already paid — record it as credit instead",
-    }
-    assert fake.ops() == calls  # no PayPal call at all
+    msg = "Invoice already paid — record it as credit instead"
+    assert r.json()["error"] == {"code": "NEEDS_CREDIT", "message": msg}
+    assert fake.ops() == calls
     db.expire_all()
     assert db.get(Proposal, copy["proposal"]).status == "PENDING"
+
+
+def test_explicit_credit_even_when_due_is_enough(api, db, fake, copy):
+    """G23: a goodwill credit leaves the invoice alone."""
+    calls = list(fake.ops())
+    r = act(api, copy["proposal"], mode="CREDIT")
+    assert r.json()["status"] == "DONE" and r.json()["payload"]["credit_cents"] == 2000
+    assert fake.ops() == calls
+    db.expire_all()
     assert db.get(Invoice, copy["invoice"]).total_cents == 142000
 
 
-def test_other_kinds_are_approved_without_paypal(api, db, fake, copy):
-    p = Proposal(buyer_id=copy["buyer_id"], kind="RETURN_CHECK", payload={"sku": "S-103"},
+def test_split_is_not_yet(api, db, copy):
+    r = act(api, copy["proposal"], mode="SPLIT")
+    assert r.status_code == 422 and r.json()["error"]["code"] == "NOT_YET"
+
+
+def test_an_edited_amount_is_the_amount_everywhere(api, db, fake, copy):
+    """R1: ledger line, PayPal line and the buyer's summary all show the edited $15.00."""
+    r = act(api, copy["proposal"], edits={"amount_cents": 1500, "reason": "small scratch"})
+    assert r.status_code == 200 and r.json()["status"] == "DONE", r.text
+    pl = r.json()["payload"]
+    assert pl["amount_cents"] == -1500 and pl["original"]["amount_cents"] == -2000
+    (line,) = paypal_adj_lines(fake, copy["paypal_id"])
+    assert line["unit_amount"]["value"] == "-15.00"
+    db.expire_all()
+    assert db.get(Invoice, copy["invoice"]).total_cents == 140500
+    (req,) = [q for q in statement(api, db, copy)["requests"] if q["id"] == copy["proposal"]]
+    assert req["summary"] == "Approved — $15.00 off INV-1051"
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [{"amount_cents": 0}, {"amount_cents": -100}, {"amount_cents": 150000},
+     {"amount_cents": "15"}, {"invoice_id": 1}],
+)  # fmt: skip
+def test_bad_edits_are_422(api, db, copy, edits):
+    r = act(api, copy["proposal"], edits=edits)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "BAD_EDIT"
+    db.expire_all()
+    assert db.get(Proposal, copy["proposal"]).status == "PENDING"
+
+
+def test_retry_after_a_failed_put_sends_the_payload_amount(api, db, fake, copy):
+    fake.fail("put", error(400, "VALIDATION_ERROR"))
+    r = act(api, copy["proposal"], edits={"amount_cents": 1500})
+    assert r.json()["status"] == "FAILED"
+    retry = act(api, copy["proposal"])
+    assert retry.json()["status"] == "DONE"
+    res = retry.json()["result"]
+    assert res["attempts"] == 2 and res["error"] is None  # merged, not replaced
+    (line,) = paypal_adj_lines(fake, copy["paypal_id"])
+    assert line["unit_amount"]["value"] == "-15.00"
+
+
+def test_a_failed_adjustment_can_only_be_retried(api, db, fake, copy):
+    """G7: the ledger already changed — no edit, no reject."""
+    fake.fail("put", error(400, "VALIDATION_ERROR"))
+    act(api, copy["proposal"])
+    for r in (act(api, copy["proposal"], edits={"amount_cents": 500}),
+              act(api, copy["proposal"], "REJECT")):  # fmt: skip
+        assert r.status_code == 409 and r.json()["error"]["code"] == "NOT_PENDING"
+
+
+def add_proposal(db, copy, kind, payload):
+    p = Proposal(buyer_id=copy["buyer_id"], kind=kind, payload=payload,
                  evidence={"source": "agent"})  # fmt: skip
     db.add(p)
     db.commit()
+    return p.id
+
+
+def test_reply_text_reaches_the_buyer(api, db, fake, copy):
+    pid = add_proposal(db, copy, "REPLY", {"reason": "Demo Diamond Co. will write back"})
     calls = list(fake.ops())
-    r = decide(api, p.id)
-    assert r.json()["status"] == "APPROVED" and fake.ops() == calls
+    r = act(api, pid, edits={"text": "We'll call you this afternoon."})
+    assert r.json()["status"] == "DONE" and fake.ops() == calls
+    (req,) = [q for q in statement(api, db, copy)["requests"] if q["id"] == pid]
+    assert req["status"] == "ANSWERED" and req["reply"] == "We'll call you this afternoon."
+
+
+def test_mark_as_seen_and_reject_with_a_reply(api, db, copy):
+    seen = add_proposal(db, copy, "REPLY", {"reason": "x"})
+    assert act(api, seen).json()["status"] == "DONE"  # G21: no text = "has seen this"
+    r = act(api, copy["proposal"], "REJECT", edits={"text": "The scratch was on delivery."})
+    assert r.json()["status"] == "REJECTED"
+    (req,) = [q for q in statement(api, db, copy)["requests"] if q["id"] == copy["proposal"]]
+    assert req["status"] == "DECLINED" and req["reply"] == "The scratch was on delivery."
+
+
+def test_return_check_needs_a_reply_in_p3a(api, db, fake, copy):
+    pid = add_proposal(db, copy, "RETURN_CHECK", {"sku": "S-103"})
+    calls = list(fake.ops())
+    r = act(api, pid)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "TEXT_REQUIRED"
+    r = act(api, pid, edits={"text": "We'll check our returns log."})
+    assert r.json()["status"] == "DONE" and fake.ops() == calls  # no line or money change
+
+
+def test_promise_note_approves_and_date_edits_wait(api, db, copy):
+    pid = add_proposal(db, copy, "PROMISE_NOTE", {"promise_date": "2026-11-13"})
+    r = act(api, pid, edits={"promise_date": "2026-11-20"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "NOT_YET"
+    assert act(api, pid).json()["status"] == "DONE"
 
 
 def test_paid_elsewhere_on_paypal_is_a_recorded_mismatch(api, db, fake, copy):

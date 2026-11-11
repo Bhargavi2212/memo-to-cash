@@ -30,6 +30,7 @@ from backend.db.models import (
     Payment,
     Proposal,
 )
+from backend.services.credit import credit_from
 
 log = logging.getLogger("statement")
 
@@ -120,6 +121,7 @@ class RequestOut(BaseModel):
     summary: str
     status: str  # WAITING | APPROVED | DECLINED | ANSWERED
     created_at: date | None
+    reply: str | None = None  # Demo Diamond Co.'s reply text, if any (P3 A8)
 
 
 def request_status(kind: str, status: str) -> str:
@@ -145,6 +147,9 @@ def _requests(rows: list[Any], inv_no: dict[int, str]) -> list[RequestOut]:
             promise_date=pl.get("promise_date"),
             reason=None if p.evidence.get("internal") else pl.get("reason"),  # guard notes
             fallback="fallback_day" in pl,
+            status=p.status,
+            mode=pl.get("mode"),
+            credit_cents=pl.get("credit_cents"),
         )
         out.append(
             RequestOut(
@@ -153,6 +158,7 @@ def _requests(rows: list[Any], inv_no: dict[int, str]) -> list[RequestOut]:
                 summary=text,
                 status=request_status(p.kind, p.status),
                 created_at=ny_date(at) if at else None,
+                reply=(p.result or {}).get("reply_text"),
             )
         )
     return out
@@ -358,7 +364,7 @@ def get_statement(session: Session, token: str, today: date, settings: Settings)
         ],
         invoices=inv_out,
         payments=pay_out,
-        credit_cents=sum(p.unapplied_cents for p in payments if p.status in LISTED),
+        credit_cents=credit_from(payments, (p for p, _at in proposal_rows)),  # one rule (G5)
         notices=notices,
         pending_proposals=pending,
         requests=_requests(proposal_rows, inv_no),

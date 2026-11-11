@@ -83,7 +83,8 @@ def proposal_list(
 
 class DecideIn(BaseModel):
     decision: Literal["APPROVE", "REJECT"]
-    edits: dict[str, Any] | None = None  # P3a step a2
+    mode: Literal["APPLY", "CREDIT", "SPLIT"] | None = None  # None → decided under the lock (A6)
+    edits: dict[str, Any] | None = None  # A7: {amount_cents?, reason?} or {text} (reply)
 
 
 def _scope_in_thread(
@@ -106,13 +107,10 @@ async def decide(
         scope = await run_in_threadpool(_scope_in_thread, request, session_factory, settings)
     except svc.ScopeError as e:
         return _error(e.status, e.code, e.message)
-    if body.edits:
-        return _error(
-            422, "EDITS_NOT_SUPPORTED", "Edit before approve comes with the supplier screens"
-        )
     try:
         return await proposals.decide(
-            session_factory, pp, proposal_id, body.decision, scope.buyer_ids
-        )
+            session_factory, pp, proposal_id, body.decision, scope.buyer_ids, body.mode,
+            body.edits,
+        )  # fmt: skip
     except proposals.ProposalError as e:
         return _error(e.status, e.code, e.message)
