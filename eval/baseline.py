@@ -27,15 +27,15 @@ ORDER = ("DISPUTE", "RETURN_CLAIM", "DEDUCTION_REQUEST", "PAYMENT_PROMISE", "QUE
 STOP = {"pair", "ring", "with", "the"}
 
 
-def _sku(text: str, facts: Facts) -> str | None:
-    if m := SKU_RE.search(text):
-        return m.group(0).upper()
+def _skus(text: str, facts: Facts) -> list[str]:
+    """Every item named: codes as written, then items matched by a description word."""
+    found = [m.upper() for m in SKU_RE.findall(text)]
     low = text.lower()
     for ln in facts.lines:
         for word in re.findall(r"[a-z]{4,}", ln.description.lower()):
-            if word not in STOP and re.search(rf"\b{word}\b", low):
-                return ln.sku
-    return None
+            if word not in STOP and re.search(rf"\b{word}\b", low) and ln.sku not in found:
+                found.append(ln.sku)
+    return found
 
 
 def _amount(text: str) -> int | None:
@@ -56,7 +56,10 @@ def triage(text: str, facts: Facts) -> tuple[str, dict[str, Any]]:
         if re.search(WORDS[name], text, re.I | re.M):
             label = name
             break
-    fields: dict[str, Any] = {"sku": _sku(text, facts)}
+    skus = _skus(text, facts)
+    fields: dict[str, Any] = {"sku": skus[0] if skus else None}
+    if label == "RETURN_CLAIM":
+        fields["skus"] = skus
     if label in ("DEDUCTION_REQUEST", "PAYMENT_PROMISE"):
         fields["amount_cents"] = _amount(SKU_RE.sub(" ", text))
     if label == "PAYMENT_PROMISE":

@@ -7,7 +7,8 @@ don't support (invariant 5).
 
 Action strings (also what the eval scores): `ADJUSTMENT:INV-1051:-2000`,
 `RETURN_CHECK:NO_RECORD:S-103`, `ANSWER:ALREADY_CREDITED:S-102`, `PROMISE_NOTE:next:FRI`,
-`ANSWER`, `REPLY`.
+`ANSWER`, `REPLY`, `REPLY:UNKNOWN:S-199`; a multi-item return claim joins its parts with `|`
+in SKU order (Z7): `ANSWER:ALREADY_CREDITED:S-121|RETURN_CHECK:NO_RECORD:S-123`.
 """
 
 import re
@@ -32,15 +33,66 @@ CLAIMED_APPROVAL_RE = re.compile(
 
 @dataclass
 class Action:
-    kind: str  # ADJUSTMENT | RETURN_CHECK | PROMISE_NOTE | REPLY | ANSWER
+    kind: str  # ADJUSTMENT | RETURN_CHECK | PROMISE_NOTE | REPLY | ANSWER | MULTI (Z7)
     code: str  # the eval's action string
     payload: dict[str, Any] = field(default_factory=dict)
     evidence: dict[str, Any] = field(default_factory=dict)
     reason: str = ""  # why a REPLY (shown to the supplier, used in summaries)
+    parts: list["Action"] = field(default_factory=list)  # a multi-item return claim (Z7)
+
+    def each(self) -> list["Action"]:
+        """The single actions to carry out: the parts of a MULTI, else just this one."""
+        return self.parts or [self]
 
 
 def _reply(reason: str, **evidence: Any) -> Action:
     return Action("REPLY", "REPLY", evidence={"source": "agent", **evidence}, reason=reason)
+
+
+def _return_one(sku: str, facts: Facts) -> Action | None:
+    line = facts.line(sku)
+    if line is None:
+        return None
+    if line.status == "RETURNED":
+        return Action(
+            "ANSWER",
+            f"ANSWER:ALREADY_CREDITED:{line.sku}",
+            payload={"sku": line.sku},
+            evidence={"records": [f"memo_line:{line.sku}", f"return:{line.return_ref}"]},
+        )
+    return Action(
+        "RETURN_CHECK",
+        f"RETURN_CHECK:NO_RECORD:{line.sku}",
+        payload={"sku": line.sku},
+        evidence={"source": "agent", "check": "NO_RECORD", "records": [f"memo_line:{line.sku}"]},
+    )
+
+
+def _return_claim(fields: dict[str, Any], facts: Facts) -> Action:
+    """Z7: each named item on its own — returned → answer from the record; kept/out with no
+    return record → RETURN_CHECK; not this buyer's → REPLY:UNKNOWN. No item matches → REPLY.
+    Return claims never change money, so handling the matched items alone is safe."""
+    raw = list(fields.get("skus") or []) + [fields.get("sku")]
+    skus = sorted({str(s).strip().upper() for s in raw if s and str(s).strip()})
+    parts: list[Action] = []
+    for sku in skus:
+        one = _return_one(sku, facts)
+        parts.append(
+            one
+            or Action(
+                "REPLY",
+                f"REPLY:UNKNOWN:{sku}",
+                payload={"sku": sku},
+                evidence={"source": "agent"},
+                reason=f"{sku} isn't on your memos — Demo Diamond Co. will check",
+            )
+        )
+    if not any(p.kind != "REPLY" for p in parts):
+        names = ", ".join(skus) or "that item"
+        return _reply(f"{names} isn't on your memos — Demo Diamond Co. will check")
+    if len(parts) == 1:
+        return parts[0]
+    return Action("MULTI", "|".join(p.code for p in parts), parts=parts)
 
 
 def decide(label: str, fields: dict[str, Any], text: str, facts: Facts) -> Action:
@@ -97,20 +149,7 @@ def decide(label: str, fields: dict[str, Any], text: str, facts: Facts) -> Actio
         )
 
     if label == "RETURN_CLAIM":
-        if line is None:
-            return _reply(f"{sku or 'that item'} isn't on your memos")
-        if line.status == "RETURNED":
-            return Action("ANSWER", f"ANSWER:ALREADY_CREDITED:{line.sku}")
-        return Action(
-            "RETURN_CHECK",
-            f"RETURN_CHECK:NO_RECORD:{line.sku}",
-            payload={"sku": line.sku},
-            evidence={
-                "source": "agent",
-                "check": "NO_RECORD",
-                "records": [f"memo_line:{line.sku}"],
-            },
-        )
+        return _return_claim(fields, facts)
 
     if label == "PAYMENT_PROMISE":
         resolved = dates.resolve(fields.get("date"), facts.today)
