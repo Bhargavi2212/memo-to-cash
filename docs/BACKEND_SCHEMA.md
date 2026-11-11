@@ -193,10 +193,10 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | POST | `/statement/{token}/capture` | public | `{paypal_order_id}` → `Receipt` |
 | POST | `/statement/{token}/ask` | public | `{question}` (1–500 chars) → `{answer, cited_records, looked_up, confidence, fallback, proposal_id?}` — always 200; a fallback answer files the day's REPLY (P4 D10, G1) |
 | POST | `/statement/{token}/message` | public | `{text}` (1–2000 chars) → `{received: true, label, summary, checks, proposal_id?, proposal_ids, answer?, fallback}` — `summary`/`checks` written by code (2-decimal money); always 200 (P4 D10) |
-| GET | `/supplier/overview` | admin | → buyers with owed/overdue/age/last payment + pending proposals count |
-| GET | `/supplier/proposals?status=PENDING` | admin | → `[Proposal]` |
-| POST | `/supplier/proposals/{id}/decide` | admin (P4; demo cookie with P3a) | `{decision: APPROVE|REJECT, edits?}` → `Proposal` (`edits` → 422 until P3a). APPROVE on an ADJUSTMENT: ledger line + total under the buyer lock → PayPal invoice PUT → DONE / FAILED; invoice due < deduction → 409 `NEEDS_CREDIT` (P3a records it as credit) |
-| GET | `/supplier/payments/{id}` | admin | → payment + allocations + PayPal statuses + audit |
+| GET | `/supplier/overview` | admin/demo (P3 A1–A2; admin list excludes demo copies) | → buyers with owed/overdue/age/last payment + pending proposals count |
+| GET | `/supplier/proposals?status=PENDING,FAILED` | admin/demo (P3 A5) | → `[Proposal]` |
+| POST | `/supplier/proposals/{id}/decide` | admin/demo (demo cookie from P3a; `mode?` APPLY\|CREDIT\|SPLIT, P3 A6) | `{decision: APPROVE|REJECT, edits?}` → `Proposal` (`edits` → 422 until P3a). APPROVE on an ADJUSTMENT: ledger line + total under the buyer lock → PayPal invoice PUT → DONE / FAILED; invoice due < deduction → 409 `NEEDS_CREDIT` (P3a records it as credit) |
+| GET | `/supplier/payments/{id}` | admin/demo (P3 A4) | → payment + allocations + PayPal statuses + audit |
 | POST | `/supplier/import` | admin | multipart CSV → `{created, updated, errors:[{row, msg}], mirrored, mirror_errors:[{invoice_no, msg}]}` |
 | POST | `/supplier/sync/{invoice_id}` | admin | → refreshed invoice from PayPal |
 | POST | `/paypal/webhook` | paypal | PayPal event → 200 always after storing; processes idempotently |
@@ -204,7 +204,7 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | POST | `/statement/{token}/payments/{id}/refresh` | public | → re-runs `resolve_recording` for that payment's RECORDING/FAILED allocations (P2 R4) → `Receipt` |
 | GET | `/config` | public | → `{paypal_client_id, demo_mode}` — loads the PayPal JS SDK at runtime (P2 D12) |
 | GET | `/supplier/buyers/{id}` | admin/demo | → buyer, memos, invoices, messages, proposals, payments, statement link |
-| POST | `/supplier/payments/record` | admin/demo | `{buyer_id, method: CHECK|WIRE_TRANSFER|OTHER, reference, amount_cents, invoice_ids?}` → payment + allocations |
+| POST | `/supplier/payments/record` | admin/demo | `{buyer_id, client_uid, method: CHECK|WIRE_TRANSFER|OTHER, reference, amount_cents, invoice_ids?, received_on?}` (P3 A9; `client_uid` makes it idempotent) → payment + allocations |
 | POST | `/demo/start` | public (DEMO_MODE, ≤ 15 per IP per hour, ≤ 60 per hour overall) | → creates a fresh demo buyer from the seed (invoice numbers suffixed `-<6 chars>`), mirrors to PayPal, sets demo cookie → `{statement_token, buyer_id, ms}` |
 
 Errors: `{error: {code, message, paypal_debug_id?}}`; 422 validation, 404 unknown token, 429 `RATE_LIMITED` / `DEMO_HOURLY_LIMIT`, 503 `NOT_CONFIGURED` (lists missing setting names, never values) / `PAYPAL_UNAVAILABLE` (transient: 5xx/429/timeout after retries, or the 20 s demo deadline), 502 `PAYPAL_REJECTED` (deterministic PayPal 4xx during demo start; debug_id logged), 409 `STATEMENT_CHANGED` / `PAYMENT_FAILED` / `ORDER_NOT_APPROVED` (an already-captured payment returns its existing receipt with 200), 402 `PAYMENT_DECLINED` (SDK restarts checkout), 503 `CAPTURE_UNCONFIRMED`, 422 `AMOUNT_NOT_POSITIVE` / `AMOUNT_EXCEEDS_SELECTED` / `NOTHING_SELECTED` / `INVOICE_NOT_OPEN`, 422 `TEXT_EMPTY` / `TEXT_TOO_LONG` (ask/message), 409 `NEEDS_CREDIT` ("Invoice already paid — record it as credit instead") / `NOT_PENDING` (decide), 502 PayPal failure (state saved, retry shown). Full P2 list: `docs/phases/P2.md` D13.

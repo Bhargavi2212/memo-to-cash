@@ -1,7 +1,7 @@
 # Phase P3 — Build plan (how we'll execute `P3.md`)
 
 Spec: `docs/phases/P3.md` v3 (source of truth). This file is the working plan: order, dependencies, checks, and the gaps found while planning.
-Branch: `p3-supplier` from `p4-agent` @ `3957ca7` (the last P4 PR isn't merged yet — G1). FRs: FR-10 (rest), FR-11, FR-14, FR-15 (copy link), FR-12 (entry points) in **P3a**; FR-7, FR-1 (endpoint), FR-10 reminders in **P3b**. Open check closed: **#3** (webhook to Render). New sandbox facts to prove: PUT to due $0 (b0), remind call shape (b4), webhook verify with the raw body (b1).
+Branch: `p3-supplier`, rebased on `main` @ `718bce9` (P4 merged as PR #5; this plan as PR #6). **Approved by Bhargavi 2026-11-11 with all G1–G22 as proposed** (+ G23–G25 from the re-read). FRs: FR-10 (rest), FR-11, FR-14, FR-15 (copy link), FR-12 (entry points) in **P3a**; FR-7, FR-1 (endpoint), FR-10 reminders in **P3b**. Open check closed: **#3** (webhook to Render). New sandbox facts to prove: PUT to due $0 (b0), remind call shape (b4), webhook verify with the raw body (b1).
 Read for this plan: P3.md (all), BACKEND_SCHEMA §2/§3/§8 (incl. Bhargavi's uncommitted §2 auth edits), TRD FR-1/7/10/11/14/15 + §6b–6b-5 + §9, UI_UX §4.3–4.5, APP_FLOW J1/J6/J8, CLAUDE.md §3–§6, and the code: `services/proposals.py`, `services/payments.py` (`record_allocations`, `resolve_recording`, `_record_one`, audit refs), `services/statement.py` (credit, requests), `agent/facts.py` (credit), `services/demo.py` (`read_demo_cookie`), `routes/supplier.py`, `db/models.py`, `render.yaml`, `requirements.txt`.
 
 ## 1. Who does what, and what blocks what
@@ -39,7 +39,8 @@ Everything in a1–a5 and b0–b4 runs locally with fakes (fake PayPal, fake LLM
 | b5 | (no commit) live P3b + open check 3 | pay one invoice on PayPal's page → statement updates within a minute | P3.md §6 rows 5–6 |
 | b6 | `docs(p3): status, results` | B8 (minus items already done in P4 step 10 — G20) | `/verify` |
 
-## 3. Gaps — each with a proposed resolution
+## 3. Gaps — resolutions approved 2026-11-11 (as proposed unless noted)
+**Notes on approval:** G4 per P3 A6 (no mode → decided under the lock; explicit APPLY with due < amount → 409). G5 one credit helper for statement, overview and the agent's facts/validator, with the equality test. G16 store-and-ignore. G17 if ContextMatic doesn't cover webhook verification, log the coverage gap like Invoicing. G21 as proposed. **G3: order P3a → P5 essentials → P3b; no pushes to `main` after Thu Nov 12 15:00 ET.**
 | # | Finding | Proposed resolution |
 |---|---|---|
 | G1 | **Blocker:** the last P4 PR isn't merged (`main` = `08c3ccb`; `p4-agent` = `3957ca7`). | Bhargavi merges it first; `p3-supplier` is cut from `p4-agent` so nothing is lost either way. |
@@ -63,6 +64,9 @@ Everything in a1–a5 and b0–b4 runs locally with fakes (fake PayPal, fake LLM
 | G19 | B6 Job C uses the LLM but has no eval rows; CLAUDE §5 says prompt changes re-run the eval. | Fake-LLM tests + validator only; Job C isn't part of any README claim; noted in P3 results. |
 | G20 | B8 lists doc items already done in P4 step 10 (CLAUDE §4 "SENT", BACKEND_SCHEMA `NEEDS_CREDIT`). | b6 does only the remaining ones. |
 | G21 | **[decide]** A8 lets an empty REPLY approval mean "Demo Diamond Co. has seen this", and A12 says the UI asks for a text. Should the API require text for REPLY approve? | API: text optional (BACKEND_SCHEMA §8); UI: text required with a "Mark as seen" secondary button that sends none. |
+| G23 | (re-read) A6 lets the supplier choose CREDIT explicitly even when the invoice still has enough due (e.g. a goodwill credit). | Allowed: explicit `mode: CREDIT` always works on a PENDING ADJUSTMENT; the card offers it under Edit. |
+| G24 | (re-read) A11's buyer wording ("Approved as $20.00 credit on your account" vs "Approved — $20.00 off INV-1051") depends on `payload.mode`; `agent/triage.py::summary()` only knows the kind. | `summary()` takes the payload's `mode`/`credit_cents`; requests read it at read time (no stored text). |
+| G25 | (re-read) Time and deadline. | P3a planned at **~2 h** (Bhargavi: my estimates ran ~4× high in P4); no pushes to `main` after Thu 15:00 ET. |
 | G22 | A11: the statement's "Credit $X" line exists (P2) but uses payments only; after G5 it includes approved credits. The receipt's `credit_cents` is per payment and stays so. | Only the statement/overview total changes; receipt unchanged. |
 
 ## 4. Open checks in this phase
@@ -82,7 +86,7 @@ Everything in a1–a5 and b0–b4 runs locally with fakes (fake PayPal, fake LLM
 | a4 payment detail | 0.5 h |
 | a5 supplier UI (3 pages, card, modal, entry points) | 2.25 h |
 | a6 live | 0.5 h |
-| **P3a** | **~7.5 h** (box 3 h) |
+| **P3a** | **~7.5 h** by step — **plan on ~2 h** (G25: P4 ran ~4× under my estimate) |
 | b0 moved items + PUT probe | 1.5 h |
 | b1 webhooks incl. D23 reconcile | 2.0 h |
 | b2 sweep + worker + render | 1.5 h |
@@ -90,7 +94,7 @@ Everything in a1–a5 and b0–b4 runs locally with fakes (fake PayPal, fake LLM
 | b4 reminders | 1.25 h |
 | b5 live + b6 docs | 1.0 h |
 | **P3b** | **~8 h** (box 3.5 h) |
-| **Total** | **~15.5 h vs 6.5 h** → G3 |
+| **Total** | ~15.5 h by step → ~4 h at the P4 ratio; order P3a → P5 essentials → P3b (G3) |
 
 ## 6. Build log
 | # | What happened | Effect |

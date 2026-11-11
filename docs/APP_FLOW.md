@@ -25,7 +25,7 @@ flowchart LR
 3. Expands memo M-201 → sees S-102 *Returned · R-311*, S-104 *Kept → INV-1038*, S-103 *Still with you*.
 4. Asks "Why is S-102 on my bill?" → agent: "S-102 isn't billed — your return R-311 was received <date>. S-103 is still with you, due back <date>." (dates relative to demo start)
 5. Sees $5,000 prefilled (demo mode) → split preview → PayPal popup (total; the split is on the order but PayPal's page shows only the total) → sandbox buyer (credentials shown on page) → receipt with split → "View on PayPal" shows the new due.
-6. "See it as the supplier" → `/supplier` → payment row already split; opens PayPal invoice to confirm; approves the **seeded** proposal ("scratch on the S-120 solitaire, take $20 off" → −$20 on INV-1051 — every demo copy starts with this one pending message + proposal). The judge can also send their own message from the statement.
+6. "See it as Demo Diamond Co." → `/supplier` → payment row already split; opens PayPal invoice to confirm; approves the **seeded** proposal ("scratch on the S-120 solitaire, take $20 off" → −$20 on INV-1051 — every demo copy starts with this one pending message + proposal). The judge can also send their own message from the statement.
    - If a visitor clicks "See the supplier side" before starting a demo, `/demo/start` runs first.
 7. "Start again" creates another fresh copy in a **new** demo session (new cookie), so the supplier view always shows exactly one Northside copy. A failed start sets no cookie and leaves nothing reachable.
 
