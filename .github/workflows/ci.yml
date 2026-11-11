@@ -45,6 +45,7 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q -rs # -rs lists skipped tests, so a skipped db test is visible
+      - run: python -m eval.run_eval --dry tests/fixtures/eval/dry_small.jsonl # P4 R11: no LLM
 
   web:
     runs-on: ubuntu-latest
