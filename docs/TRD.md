@@ -115,7 +115,7 @@ Refund/reversal handling of statement payments (shown, not automated), our own e
 
 ## 9. Open checks (do in P1–P3)
 1. ✅ (P1) PUT adjustment on a PARTIALLY_PAID invoice works (strip rule; `?send_to_recipient=false&send_to_invoicer=false`; PUT answers with a link → GET for the new due).
-2. ◐ (P2, Nov 10) **Venmo button renders** in the sandbox (with `buyer-country=US`, `enable-funding=venmo,paylater`), next to PayPal, Pay Later and Debit or Credit Card. Whether a sandbox Venmo payment can complete (needs the Venmo app) — not tried; README limits.
+2. ✅ (P2, Nov 10; live run) **Venmo button renders** in the sandbox (with `buyer-country=US`, `enable-funding=venmo,paylater`), next to PayPal, Pay Later and Debit or Credit Card. Whether a sandbox Venmo payment can complete (needs the Venmo app) — not tried; README limits.
 3. Webhook delivery to the Render URL; signature verification.
 4. LLM tool-calling latency acceptable for the ask box (< 8 s) on real statements (P4 eval). P0: 1.2–1.8 s for tool call + answer on a tiny case.
 5. ✅ (P0) LLM key + model id: Meta Model API key works at `api.meta.ai/v1`; `muse-ember-1.0` available. (The old Llama API `api.llama.com` rejects Model API keys.) Deep health on Render re-confirms after deploy.
@@ -127,6 +127,6 @@ Refund/reversal handling of statement payments (shown, not automated), our own e
 11. ✅ (P1) Duplicate `invoice_number` → HTTP 422, `name` = `UNPROCESSABLE_ENTITY`, **`details[].issue` = `DUPLICATE_INVOICE_NUMBER`** — match on the issue, never the name.
 
 12. ✅ (P2 smoke, Nov 10) Capture with `Prefer: return=representation` returns `purchase_units[0].payments.captures[0].{id, status COMPLETED, amount, custom_id}`; `NO_SHIPPING` removes the address step. With `payment_source.paypal` the order starts as `PAYER_ACTION_REQUIRED` and gives only a `payer-action` link (no `approve`). A declined capture (sandbox `PayPal-Mock-Response` INSTRUMENT_DECLINED) is **not** replayed for the same Request-Id.
-13. ◐ (P2 smoke, Nov 10) Items are stored on the order but PayPal's **new checkout page does not display them** (only the total, an "Order $5,000.00" row). Pay Later at $5,000 = **Pay Monthly** ($269.37/mo × 24) + **PayPal Credit**; no Pay in 4. The split is shown on our statement (before) and receipt (after) instead.
+13. ◐ open (P2 smoke + live run, Nov 10) Items are stored on the order but PayPal's **checkout popup does not display them in its main view** (only the total, an "Order $5,000.00" row). Pay Later at $5,000 = **Pay Monthly** ($269.37/mo × 24) + **PayPal Credit**; no Pay in 4. The split is shown on our statement (before) and receipt (after) instead.
 
 Checks 1, 6, 8, 9, 10, 11 answered on 2026-11-09 by `python -m scripts.sandbox.p1_open_checks` (re-runnable; also R6: create with `Prefer: return=representation` returns the full invoice and send returns the payer link → 2 calls per invoice; R12: a reused send Request-Id did not replay a failure).
