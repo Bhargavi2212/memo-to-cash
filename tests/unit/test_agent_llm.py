@@ -65,7 +65,7 @@ def run(job, outcome, **kw):
 def test_triage_ok_parses_and_uses_the_d8_settings():
     res, fake = run("triage", resp(json.dumps(TRIAGE_OK)))
     assert res.ok and res.data.label == "DEDUCTION_REQUEST" and res.data.fields.sku == "S-104"
-    assert res.tokens == (900, 120) and res.prompt_version == "triage-v1"
+    assert res.tokens == (900, 120) and res.prompt_version == "triage-v2"
     kw = fake.calls[0]
     assert kw["max_tokens"] == 1600 and kw["temperature"] == 0.1
     assert kw["model"] == settings.llm_model and kw["reasoning_effort"] == "low"
@@ -77,7 +77,7 @@ def test_answer_ok_and_per_call_model_override():
     res, fake = run("answer", resp(json.dumps(ANSWER_OK)), model="muse-spark-1.3")
     assert res.ok and res.data.cited_records == ["memo_line:S-102", "return:R-311"]
     assert res.model == "muse-spark-1.3" and fake.calls[0]["model"] == "muse-spark-1.3"
-    assert res.prompt_version == "answer-v1"
+    assert res.prompt_version == "answer-v2"
     assert settings.llm_model != "muse-spark-1.3"  # no global mutation (D20)
 
 

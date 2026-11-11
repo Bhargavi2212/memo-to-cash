@@ -1,5 +1,7 @@
 """P4 step 2 — the answer validator (D4, R7, Z8): money, day counts, refs, citations, length."""
 
+import re
+
 import pytest
 
 from backend.agent.facts import facts_from_seed
@@ -79,3 +81,45 @@ def test_money_reading_formats():
 
 def test_allowed_days_cover_returns_due_backs_and_due_dates():
     assert {38, 11, 25, 18, 21, 6} <= allowed_days(SEED)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "S-102 was returned (return:R-311).",
+        "Your payment:1 was applied.",
+        "See memo_line:S-120 on invoice:INV-1051.",
+        "proposal:seed is still waiting.",
+        "Memo:M-207 is open.",
+    ],
+)
+def test_record_ids_in_the_answer_text_are_rejected(text):
+    problems = check_answer(ans(text, ["memo_line:S-102"]), SEED)
+    assert any("record id in the answer text" in p for p in problems), problems
+
+
+def test_plain_words_with_colons_are_fine():
+    text = "Return R-311 arrived 38 days ago. Invoice: INV-1051, due in 25 days."
+    assert check_answer(ans(text, ["return:R-311"]), SEED) == []
+
+
+def test_prompts_use_no_seed_ids_items_or_values():
+    """Prompt examples must not leak the seed/dev rows (ids, item words, amounts, days)."""
+    from pathlib import Path
+
+    from backend.agent.tools import record_ids
+
+    text = "\n".join(
+        p.read_text("utf-8").lower()
+        for p in (Path(__file__).parents[2] / "backend" / "agent" / "prompts").glob("*.md")
+    )
+    seed_ids = {r.split(":", 1)[1].lower() for r in record_ids(PAID)}
+    words = {w for ln in SEED.lines for w in ln.description.lower().split() if len(w) > 3}
+    values = {f"${c // 100:,}" for c in allowed_money(PAID) if c} | {
+        f"{d} days" for d in allowed_days(SEED) if d > 1}  # fmt: skip
+
+    def found(x):  # whole tokens only ("oval" isn't in "approval")
+        return re.search(rf"(?<![\w$-]){re.escape(x)}(?![\w-])", text) is not None
+
+    leaks = sorted(x for x in seed_ids | words | values if found(x))
+    assert leaks == [], leaks

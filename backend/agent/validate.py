@@ -9,7 +9,9 @@ be shown. Any problem → the caller's safe fallback (D7). Checks:
     are ignored;
 (c) every day count ("38 days ago", "in 11 days", "18 days overdue") is in the allowed set;
 (d) every SKU / invoice / memo / return ref mentioned exists for this buyer;
-(e) ≤ 600 characters.
+(e) ≤ 600 characters;
+(f) no record id in the text (`memo_line:S-102`, `payment:1`, …): ids belong in cited_records,
+    never in what the buyer reads.
 """
 
 import re
@@ -27,6 +29,7 @@ MONEY_RE = re.compile(
 BARE_RE = re.compile(r"(?<![\w$.,-])(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+\.\d{2})(?![\w.,]*\d)")
 MONEY_WORDS = re.compile(r"\b(owe[sd]?|owing|paid|pay|due|price[sd]?|total|balance|credit)\b", re.I)
 DAYS_RE = re.compile(r"\b(\d+)\s+days?\b", re.I)
+RECORD_ID_RE = re.compile(r"\b(?:memo_line|memo|return|invoice|payment|proposal):[A-Za-z0-9]", re.I)
 REF_RES = {
     "memo_line": re.compile(r"\bS-\d{3}\b", re.I),
     "invoice": re.compile(r"\bINV-\d+\b", re.I),
@@ -100,6 +103,8 @@ def check_answer(result: AnswerResult, f: Facts) -> list[str]:
     text = result.answer
     if len(text) > MAX_CHARS:
         problems.append(f"answer longer than {MAX_CHARS} chars")
+    if ids := RECORD_ID_RE.findall(text):
+        problems.append(f"record id in the answer text ({len(ids)})")
     if bad := unknown_records(f, result.cited_records):
         problems.append(f"cites unknown records {bad}")
     money = allowed_money(f)

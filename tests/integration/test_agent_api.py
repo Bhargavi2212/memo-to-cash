@@ -81,7 +81,7 @@ def test_ask_returns_a_validated_answer_with_looked_up(db, api, llm_box):
     assert body["looked_up"] == ["memo_line:S-102", "return:R-311"]
     msg = db.scalars(select(Message).where(Message.buyer_id == b.id)).one()
     assert msg.kind == "QUESTION_UI" and msg.ai_result["looked_up"] == body["looked_up"]
-    assert msg.ai_result["prompt_version"] == "answer-v1" and proposals(db, b.id) == []
+    assert msg.ai_result["prompt_version"] == "answer-v2" and proposals(db, b.id) == []
 
 
 def test_ungrounded_answers_fall_back_into_one_reply_per_day(db, api, llm_box):
