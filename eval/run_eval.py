@@ -22,6 +22,7 @@ from openai import OpenAI
 
 from backend.agent.actions import decide
 from backend.agent.facts import facts_from_seed
+from backend.agent.schemas import TRIAGE_SCHEMA
 from backend.agent.tools import facts_prompt
 from backend.core.config import settings
 from backend.core.dates import today_ny
@@ -29,32 +30,6 @@ from eval import baseline
 
 ROOT = Path(__file__).resolve().parent
 PROMPT = (ROOT.parent / "backend" / "agent" / "prompts" / "triage.md").read_text(encoding="utf-8")
-LABELS = ["QUESTION", "RETURN_CLAIM", "DEDUCTION_REQUEST", "PAYMENT_PROMISE", "DISPUTE", "OTHER"]
-NULLABLE_STR = {"type": ["string", "null"]}
-TRIAGE_SCHEMA = {
-    "name": "triage",
-    "strict": True,
-    "schema": {
-        "type": "object",
-        "properties": {
-            "label": {"type": "string", "enum": LABELS},
-            "fields": {
-                "type": "object",
-                "properties": {
-                    "sku": NULLABLE_STR,
-                    "amount_cents": {"type": ["integer", "null"]},
-                    "date": NULLABLE_STR,
-                    "invoice_no": NULLABLE_STR,
-                    "reason": NULLABLE_STR,
-                },
-                "required": ["sku", "amount_cents", "date", "invoice_no", "reason"],
-                "additionalProperties": False,
-            },
-        },
-        "required": ["label", "fields"],
-        "additionalProperties": False,
-    },
-}
 
 
 def agent_triage(client: OpenAI, model: str, facts, text: str) -> tuple[str, dict, dict]:
@@ -65,7 +40,7 @@ def agent_triage(client: OpenAI, model: str, facts, text: str) -> tuple[str, dic
             model=model,
             temperature=0.1,
             reasoning_effort=settings.llm_reasoning_effort,
-            max_tokens=1200,
+            max_tokens=1600,
             response_format={"type": "json_schema", "json_schema": TRIAGE_SCHEMA},
             messages=[
                 {"role": "system", "content": PROMPT + "\n" + facts_prompt(facts)},

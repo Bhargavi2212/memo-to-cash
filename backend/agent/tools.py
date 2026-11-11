@@ -14,6 +14,25 @@ def usd(cents: int) -> str:
     return f"{sign}${whole:,}.{frac:02d}"
 
 
+def record_ids(f: Facts) -> set[str]:
+    """Every record id the prompt shows — what an answer may cite (validators, step 3)."""
+    ids = {f"memo:{x.memo_no}" for x in f.memos}
+    for ln in f.lines:
+        ids.add(f"memo_line:{ln.sku}")
+        if ln.return_ref:
+            ids.add(f"return:{ln.return_ref}")
+    ids |= {f"invoice:{i.invoice_no}" for i in f.invoices}
+    ids |= {f"payment:{p.id}" for p in f.payments}
+    ids |= {f"proposal:{p.id}" for p in f.proposals if p.status == "PENDING"}  # Z8
+    return ids
+
+
+def unknown_records(f: Facts, cited: list[str]) -> list[str]:
+    """Cited ids that aren't this buyer's records (empty = every cited record exists)."""
+    known = {r.lower() for r in record_ids(f)}
+    return [c for c in cited if c.strip().lower() not in known]
+
+
 def facts_prompt(f: Facts) -> str:
     out = [
         f"Buyer: {f.buyer_name}. Today: {f.today.isoformat()}.",
@@ -43,12 +62,14 @@ def facts_prompt(f: Facts) -> str:
     for p in f.payments:
         applied = ", ".join(f"{no} {usd(c)}" for no, c in p.applied)
         out.append(f"- payment:{p.id} · {usd(p.amount_cents)} · {p.received_on} · {applied}")
-    out += ["", "REQUESTS ALREADY SENT TO THE SUPPLIER (kind · invoice · sku · amount · status):"]
+    out += [
+        "",
+        "REQUESTS ALREADY SENT TO THE SUPPLIER (id · kind · invoice · sku · amount · status):",
+    ]
     if not f.proposals:
         out.append("- none")
     for pr in f.proposals:
         amount = usd(pr.amount_cents) if pr.amount_cents is not None else "-"
-        out.append(
-            f"- {pr.kind} · {pr.invoice_no or '-'} · {pr.sku or '-'} · {amount} · {pr.status}"
-        )
+        refs = f"{pr.invoice_no or '-'} · {pr.sku or '-'}"
+        out.append(f"- proposal:{pr.id} · {pr.kind} · {refs} · {amount} · {pr.status}")
     return "\n".join(out)

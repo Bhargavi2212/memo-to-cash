@@ -1,16 +1,21 @@
 """Facts: a plain, immutable snapshot of ONE buyer's records (P4 D2, R1, W1, Y3).
 
-Records only — never settings, secrets, `demo_login` or emails. Built from the seed CSV with
-no database (`facts_from_seed`, used by the eval) — step 1 adds `facts_for_buyer` (DB) and a
-test that both give the same Facts for the same seed.
+Records only — never settings, secrets, `demo_login`, tokens or emails. Two builders give the
+same Facts for the same seed (tested): `facts_from_seed` (the seed CSV, no database — the eval)
+and `facts_for_buyer` (the database — the live agent). Every query filters by buyer_id
+(invariant 7).
 """
 
 from dataclasses import dataclass
 from datetime import date
 
-from backend.core.dates import age_days, days_overdue, offset
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from backend.core.dates import age_days, days_overdue, ny_date, offset
 from backend.core.money import to_cents
 from backend.core.split import OpenInvoice, split_payment
+from backend.db import models as m
 from backend.services import importer
 from backend.services.demo import BUYER_NAME, build_csv
 
@@ -59,6 +64,7 @@ class Payment:
 
 @dataclass(frozen=True)
 class Proposal:
+    id: str  # record id `proposal:<id>`; `seed` for the seeded S-120 request (Z8)
     kind: str  # ADJUSTMENT | RETURN_CHECK | REPLY | PROMISE_NOTE
     invoice_no: str | None
     sku: str | None
@@ -102,7 +108,7 @@ class Facts:
         return max((age_days(i.issued_on, self.today) for i in open_), default=0)
 
 
-SEED_PROPOSAL = Proposal("ADJUSTMENT", "INV-1051", "S-120", -2000, "PENDING")
+SEED_PROPOSAL = Proposal("seed", "ADJUSTMENT", "INV-1051", "S-120", -2000, "PENDING")
 
 
 def facts_from_seed(today: date, paid_cents: int = 0) -> Facts:
@@ -175,9 +181,128 @@ def facts_from_seed(today: date, paid_cents: int = 0) -> Facts:
     return Facts(
         buyer_name=BUYER_NAME,
         today=today,
-        memos=memos,
+        memos=tuple(sorted(memos, key=lambda x: (x.sent_on, x.memo_no))),
         lines=tuple(sorted(lines, key=lambda ln: ln.sku)),
         invoices=tuple(sorted(invoices, key=lambda i: (i.due_on, i.invoice_no))),
         payments=payments,
         proposals=(SEED_PROPOSAL,),
+    )
+
+
+LISTED = {"CAPTURED", "CAPTURE_PENDING", "RECORDED"}  # the same set the statement lists
+
+
+def _proposal_sku(p: m.Proposal) -> str | None:
+    """The SKU a proposal is about: `payload.sku` (agent) or its `memo_line:` record (seed)."""
+    if p.payload.get("sku"):
+        return str(p.payload["sku"])
+    for ref in p.evidence.get("records", []):
+        if isinstance(ref, str) and ref.startswith("memo_line:"):
+            return ref.split(":", 1)[1]
+    return None
+
+
+def facts_for_buyer(session: Session, buyer_id: int, today: date) -> Facts:
+    """One buyer's records from the database. The buyer id comes from the statement token,
+    never from the model (invariant 7)."""
+    buyer = session.get(m.Buyer, buyer_id)
+    if buyer is None:
+        raise LookupError("buyer not found")
+    memo_rows = list(session.scalars(select(m.Memo).where(m.Memo.buyer_id == buyer_id)))
+    memo_by_id = {r.id: r for r in memo_rows}
+    invoice_rows = list(
+        session.scalars(
+            select(m.Invoice).where(
+                m.Invoice.buyer_id == buyer_id, m.Invoice.ledger_status != "CANCELLED"
+            )
+        )
+    )
+    inv_no = {i.id: i.erp_invoice_no for i in invoice_rows}
+    line_invoice = dict(
+        session.execute(
+            select(m.InvoiceLine.memo_line_id, m.InvoiceLine.invoice_id)
+            .join(m.Invoice, m.InvoiceLine.invoice_id == m.Invoice.id)
+            .where(m.Invoice.buyer_id == buyer_id, m.InvoiceLine.memo_line_id.is_not(None))
+        ).all()
+    )
+    line_rows = session.scalars(
+        select(m.MemoLine)
+        .join(m.Memo, m.MemoLine.memo_id == m.Memo.id)
+        .where(m.Memo.buyer_id == buyer_id)
+    )
+    lines = []
+    for ln in line_rows:
+        memo = memo_by_id[ln.memo_id]
+        kept = ln.status == "KEPT"
+        lines.append(
+            Line(
+                sku=ln.sku,
+                description=ln.description,
+                price_cents=ln.price_cents,
+                status=ln.status,
+                memo_no=memo.memo_no,
+                returned_on=ln.returned_on,
+                return_ref=ln.return_ref,
+                due_back_on=memo.due_back_on if ln.status == "OUT" else None,
+                invoice_no=inv_no.get(line_invoice.get(ln.id, -1)) if kept else None,
+            )
+        )
+    pay_rows = list(
+        session.scalars(
+            select(m.Payment)
+            .where(m.Payment.buyer_id == buyer_id, m.Payment.status.in_(LISTED))
+            .order_by(m.Payment.id)
+        )
+    )
+    allocs: dict[int, list[tuple[str, int]]] = {}
+    for a in session.scalars(
+        select(m.Allocation)
+        .join(m.Payment, m.Allocation.payment_id == m.Payment.id)
+        .where(m.Payment.buyer_id == buyer_id)
+        .order_by(m.Allocation.id)
+    ):
+        allocs.setdefault(a.payment_id, []).append((inv_no.get(a.invoice_id, ""), a.amount_cents))
+    payments = tuple(
+        Payment(
+            p.id,
+            p.amount_cents,
+            ny_date(p.received_at or p.created_at),
+            tuple(allocs.get(p.id, [])),
+        )
+        for p in pay_rows
+    )
+    proposals = tuple(
+        Proposal(
+            id="seed" if p.evidence.get("source") == "seed" else str(p.id),
+            kind=p.kind,
+            invoice_no=inv_no.get(p.payload.get("invoice_id", -1)),
+            sku=_proposal_sku(p),
+            amount_cents=p.payload.get("amount_cents"),
+            status=p.status,
+        )
+        for p in session.scalars(
+            select(m.Proposal).where(m.Proposal.buyer_id == buyer_id).order_by(m.Proposal.id)
+        )
+    )
+    memos = (Memo(r.memo_no, r.sent_on, r.due_back_on) for r in memo_rows)
+    invoices = (
+        Invoice(
+            i.erp_invoice_no,
+            memo_by_id[i.memo_id].memo_no,
+            i.total_cents,
+            i.paid_cents,
+            i.issued_on,
+            i.due_on,
+        )
+        for i in invoice_rows
+    )
+    return Facts(
+        buyer_name=buyer.name,
+        today=today,
+        memos=tuple(sorted(memos, key=lambda x: (x.sent_on, x.memo_no))),
+        lines=tuple(sorted(lines, key=lambda ln: ln.sku)),
+        invoices=tuple(sorted(invoices, key=lambda i: (i.due_on, i.invoice_no))),
+        payments=payments,
+        proposals=proposals,
+        credit_cents=sum(p.unapplied_cents for p in pay_rows),
     )
