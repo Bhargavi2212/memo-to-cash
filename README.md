@@ -16,11 +16,11 @@ Then the retailer has to work it out by hand. *Which memo is this invoice for? D
 
 The money is slow not because buyers won't pay, but because **the bill doesn't explain itself and can't be paid in one go**.
 
-This is normal trade, not an edge case. In a JA/JBT survey, [39% of US jewelers' store merchandise was memo inventory](https://www.jckonline.com/editorial-article/new-study-from-ja-and-jbt/), and Signet alone held [$601.5M of consignment stock](https://rapaport.com/magazine-article/shifting-tides-in-the-us-jewelry-market/). More than half of small businesses have invoices unpaid past 30 days. Large companies solve this with enterprise accounts-receivable portals (Versapay, Billtrust, Upflow), sold on custom contracts. **PayPal Invoicing has no statement and no way to pay several invoices at once** — every payment is one invoice at a time. That gap is what I built for. (Sources: [`docs/RESEARCH.md`](docs/RESEARCH.md).)
+This is normal trade, not an edge case. In a JA/JBT survey, [39% of US jewelers' store merchandise was memo inventory](https://www.jckonline.com/editorial-article/new-study-from-ja-and-jbt/), and Signet alone held [$601.5M of consignment stock](https://rapaport.com/magazine-article/shifting-tides-in-the-us-jewelry-market/). More than half of small businesses have invoices unpaid past 30 days. Large companies solve this with enterprise accounts-receivable portals (Versapay, Billtrust, Upflow), sold on custom contracts. **PayPal Invoicing has no statement and no way to pay several invoices at once**: every payment is one invoice at a time. That gap is what I built for. (Sources: [`docs/RESEARCH.md`](docs/RESEARCH.md).)
 
 ## What it does
 
-**For the buyer** — one link, no account:
+**For the buyer** (one link, no account):
 - Every memo, line by line: **kept** (and on which invoice), **returned** (with the return reference and date), **still with you** (and when it's due back).
 - What's owed, how old it is, and what's past due.
 - **Pay several invoices in one PayPal checkout.** Pick invoices or type an amount; the split preview shows exactly where the money goes (oldest due first). PayPal's own buttons offer PayPal, Pay Later, Venmo and card.
@@ -38,7 +38,7 @@ This is normal trade, not an edge case. In a JA/JBT survey, [39% of US jewelers'
 
 1. **Start the demo.** You get your own private copy, with three buyers and real PayPal sandbox invoices. Northside Jewelers' statement opens.
 2. Open memo **M-201**: S-102 *returned*, S-104 *kept → INV-1038*, S-103 *still with you*. Ask **"Why is S-102 on my bill?"**
-3. **Pay** — $5,000 is prefilled. The preview shows the split. Pay with the sandbox buyer shown on the page. The receipt shows the split, and **View on PayPal** shows the invoices updated.
+3. **Pay.** $5,000 is prefilled. The preview shows the split. Pay with the sandbox buyer shown on the page. The receipt shows the split, and **View on PayPal** shows the invoices updated.
 
    <img src="docs/img/paypal-popup.png" alt="One PayPal checkout for several invoices" width="380"> <img src="docs/img/receipt-1.png" alt="The receipt with the split across invoices" width="380">
 4. **See it as Demo Diamond Co.** → the payment is already split on the supplier side. Approve the seeded request (*"scratch on the S-120 solitaire, take $20 off"*). The card shows **"PayPal invoice INV-1051 updated: due $1,400.00 · View on PayPal"**.
@@ -48,11 +48,11 @@ This is normal trade, not an edge case. In a JA/JBT survey, [39% of US jewelers'
 
 | PayPal API | What I use it for |
 |---|---|
-| **Invoicing v2** — create + send | Every ERP invoice becomes a real PayPal invoice: each kept memo line is a line item, partial payment allowed, due date equal to ours, and the statement link in the invoice note so PayPal's own email carries it. |
+| **Invoicing v2**: create + send | Every ERP invoice becomes a real PayPal invoice: each kept memo line is a line item, partial payment allowed, due date equal to ours, and the statement link in the invoice note so PayPal's own email carries it. |
 | **Orders v2 + JS SDK** | **One checkout for many invoices.** The order carries the split as items and our payment id as `custom_id`. The capture is re-checked against current balances under a lock. |
-| **Invoicing v2** — record payment | After a capture (or a cheque the supplier records), the money is recorded **on each PayPal invoice**, so PayPal's due amounts match ours. |
-| **Invoicing v2** — update (PUT) | An approved deduction adds a negative line to the PayPal invoice. I proved in the sandbox that this works even on a partly paid invoice, down to exactly $0.00 due ([sandbox results](docs/PAYPAL_SANDBOX.md)). |
-| **Invoicing v2** — remind | An approved reminder is sent by PayPal itself, at most 2 per invoice per day. |
+| **Invoicing v2**: record payment | After a capture (or a cheque the supplier records), the money is recorded **on each PayPal invoice**, so PayPal's due amounts match ours. |
+| **Invoicing v2**: update (PUT) | An approved deduction adds a negative line to the PayPal invoice. I proved in the sandbox that this works even on a partly paid invoice, down to exactly $0.00 due ([sandbox results](docs/PAYPAL_SANDBOX.md)). |
+| **Invoicing v2**: remind | An approved reminder is sent by PayPal itself, at most 2 per invoice per day. |
 | **Webhooks** | `INVOICING.INVOICE.PAID`, `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED` and the cancel/refund events, verified with `verify-webhook-signature`. A buyer who pays on PayPal's own invoice page shows up in our ledger about a second later. |
 
 **Proved live on Render (Nov 12):** I paid INV-1038 on PayPal's own invoice page. The webhook was verified in 220 ms, and the payment was in our ledger about a second later. The next "Pay" charged only the other two invoices ($4,920.00). No double charge, no stray credit, and the buyer owes $0.00.
@@ -61,7 +61,7 @@ This is normal trade, not an edge case. In a JA/JBT survey, [39% of US jewelers'
 
 The agent is built so that **the model labels and extracts, and code decides.** It never changes money.
 
-**Why the agent doesn't call PayPal itself:** this is a supplier's money and a buyer's bill. The agent *proposes*, a person *approves*, and only then does the app call PayPal Invoicing — so no model output can ever change an invoice, send a reminder or move a payment on its own.
+**Why the agent doesn't call PayPal itself:** this is a supplier's money and a buyer's bill. The agent *proposes*, a person *approves*, and only then does the app call PayPal Invoicing. No model output can ever change an invoice, send a reminder or move a payment on its own.
 
 - **Answers** ("Ask about this statement"): one model call with the buyer's own records in the prompt. Code then checks every answer: every money figure and day count must appear in the records, every SKU / invoice / memo it names must exist, no record ids in the text, at most 600 characters. An answer that fails becomes a safe fallback: "Demo Diamond Co. will answer this".
 - **Messages → proposals:** the model labels the message (return claim, deduction request, payment promise, dispute, question) and extracts fields. **Code** (`backend/agent/actions.py`) decides the action from the records: a deduction must be ≤ the line's price; a repeat request is answered "Already sent"; payment dates are resolved by code, never by the model. The result is a **proposal**. Only the supplier's approval moves money or touches PayPal.
@@ -77,12 +77,12 @@ The agent is built so that **the model labels and extracts, and code decides.** 
 | Keyword rules | 5 of 14 |
 | **Unsafe actions** (agent) | **0** |
 
-On 14 held-out messages written by the founder and never seen during development, the agent picked the correct label and action for 11–12 of the 14 in each of 3 passes, vs 5 of 14 for keyword rules (muse-ember-1.0), with 0 unsafe actions; none of its mistakes turned into a wrong money action — each became a message for the supplier to answer.
+On 14 held-out messages written by the founder and never seen during development, the agent picked the correct label and action for 11–12 of the 14 in each of 3 passes, vs 5 of 14 for keyword rules (muse-ember-1.0), with 0 unsafe actions; none of its mistakes turned into a wrong money action; each became a message for the supplier to answer.
 
 - **Looser measure: action only** (right action, label not required, after code checks and fallbacks): agent 12–13/14 per pass, keyword rules 7/14.
 - **Answers (Job A):** grounded in the records in 2/2 (n = 2) main held-out questions and 1/1 in the "pattern also in dev" group, in every pass. These are counts, not a percentage claim.
-- **How it's built to be safe:** the model only labels and extracts; code (`backend/agent/actions.py`) decides every action from the buyer's own records, and code checks every answer (`backend/agent/validate.py`) — money figures, day counts, record references. The agent never changes money: a supplier approves every proposal. On prompt-injection rows, any action other than the expected one counts as unsafe — 0 in every pass.
-- **Method:** dev rows (`eval/messages.jsonl`) were used for tuning; prompts, baseline and decision code were then frozen (commit `f41cd1b`) and the held-out set (`eval/heldout.jsonl`, 18 rows written by the founder) was run once, 3 passes. A miss found by the held-out run ("end of nxt week" — the date code couldn't read "nxt") was fixed afterwards in a separate commit and is **not** counted in these numbers.
+- **How it's built to be safe:** the model only labels and extracts; code (`backend/agent/actions.py`) decides every action from the buyer's own records, and code checks every answer (`backend/agent/validate.py`): money figures, day counts, record references. The agent never changes money: a supplier approves every proposal. On prompt-injection rows, any action other than the expected one counts as unsafe, and there were 0 in every pass.
+- **Method:** dev rows (`eval/messages.jsonl`) were used for tuning; prompts, baseline and decision code were then frozen (commit `f41cd1b`) and the held-out set (`eval/heldout.jsonl`, 18 rows written by the founder) was run once, 3 passes. A miss found by the held-out run ("end of nxt week": the date code couldn't read "nxt") was fixed afterwards in a separate commit and is **not** counted in these numbers.
 - **Reports:** [held-out](eval/results/2026-11-11-heldout-ember-x3.md) · [dev, frozen versions](eval/results/2026-11-11-dev-ember-x3.md). Every raw model output is in the matching `.jsonl`; `python -m eval.run_eval --dry <file>` recomputes a report without calling the model.
 - **Live (Render):** questions answered in p50 1.4 s / p95 2.0 s; messages p50 1.2 s / p95 3.0 s; "Start the demo" 2.2–3.4 s, with the agent's own proposal in 4 of 4 starts.
 
@@ -94,10 +94,10 @@ This handles other people's money, so I wrote the rules down first and every one
 
 - **Integer cents everywhere.** No floats for money in Python, SQL or TypeScript.
 - **One split function** (`backend/core/split.py`): only the selected invoices, oldest due first, never above a balance, sums exactly. Hypothesis property tests.
-- **One writer per buyer.** Every money write takes a Postgres advisory lock for that buyer, so two payments can't split against stale balances. Captured money that no longer fits becomes **credit** — never lost, never auto-refunded.
+- **One writer per buyer.** Every money write takes a Postgres advisory lock for that buyer, so two payments can't split against stale balances. Captured money that no longer fits becomes **credit**. It is never lost and never auto-refunded.
 - **Idempotent everywhere.** Unique keys on PayPal ids, transaction ids and event ids. Every PayPal write sends `PayPal-Request-Id`. A double click, a retry or a webhook replay does nothing new.
 - **Race-safe recording.** Before recording on PayPal, the allocation is marked RECORDING and committed. Every recorded payment's note carries a token `[MTC:<allocation uid>]`, so after a timeout we search for the token instead of recording twice.
-- **Paid twice?** If a buyer pays an invoice on PayPal's page *and* through our Pay button, our duplicate allocation is reduced, the extra is held as credit, and the supplier gets a card: *"$X paid twice — held as credit; refund it from PayPal if they want it back."* This runs from the webhook, from the sweep if the webhook is lost, and **before** Pay, which asks PayPal first and refuses to charge an invoice already paid there.
+- **Paid twice?** If a buyer pays an invoice on PayPal's page *and* through our Pay button, our duplicate allocation is reduced, the extra is held as credit, and the supplier gets a card saying the amount was paid twice, is held as credit, and can be refunded from PayPal if the buyer wants it back. This runs from the webhook, from the sweep if the webhook is lost, and **before** Pay, which asks PayPal first and refuses to charge an invoice already paid there.
 - **Our ledger decides what's owed.** PayPal's status is stored next to ours; a difference is shown to the supplier as a mismatch, never silently overwritten.
 
 ## Architecture
@@ -164,7 +164,7 @@ Its PayPal context is the PayPal Server SDK (Orders, Payments, Vault…). It doe
 
 ## Run it locally
 
-**The hosted demo is the intended way to test** — it needs no keys. To run it yourself you need Python 3.12, Node 20+, a Postgres database (I use Neon) and PayPal sandbox + Meta Model API keys. Copy [`.env.example`](.env.example) to `.env` and fill in the values (every variable is explained there and in `docs/TRD.md` §7).
+**The hosted demo is the intended way to test.** It needs no keys. To run it yourself you need Python 3.12, Node 20+, a Postgres database (I use Neon) and PayPal sandbox + Meta Model API keys. Copy [`.env.example`](.env.example) to `.env` and fill in the values (every variable is explained there and in `docs/TRD.md` §7).
 
 **Windows (PowerShell)**
 ```powershell
@@ -210,5 +210,5 @@ All names and data in the demo are made up: Demo Diamond Co., Northside Jewelers
 
 ---
 
-**Team:** Bhargavi — product, research, the PayPal sandbox work, the eval set and its labels, and the build. _(Add anyone else who worked on it.)_
+**Team:** Bhargavi (product, research, the PayPal sandbox work, the eval set and its labels, and the build). _(Add anyone else who worked on it.)_
 **Licence:** [MIT](LICENSE).
