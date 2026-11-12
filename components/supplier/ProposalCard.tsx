@@ -28,7 +28,10 @@ function approveLabel(c: Card): string {
   return "Reply";
 }
 
-export function ProposalCard({ card, onDone }: { card: Card; onDone: () => void }) {
+/** What the decide call returns: the proposal after the decision (status, payload, result). */
+export type Decided = Pick<Card, "id" | "status" | "payload" | "result">;
+
+export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -48,7 +51,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: () => void 
     setError(null);
     api.supplier
       .decide(card.id, body)
-      .then(onDone)
+      .then((d) => onDone(d as Decided))
       .catch((e: unknown) => {
         setBusy(false);
         setError(e instanceof ApiError ? e.message : "Something went wrong. Please try again.");
@@ -68,7 +71,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: () => void 
   };
 
   return (
-    <article className="rounded-card border border-line bg-surface p-4">
+    <article className="min-w-0 break-words rounded-card border border-line bg-surface p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium">{card.buyer.name}</span>
         <StatusChip tone={card.source === "agent" ? "accent" : "muted"}>
@@ -85,7 +88,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: () => void 
       {card.checks.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-2" aria-label="Checked by code">
           {card.checks.map((c) => (
-            <li key={c} className="rounded-full bg-success/10 px-3 py-1 text-xs text-success">
+            <li key={c} className="max-w-full rounded-full bg-success/10 px-3 py-1 text-xs text-success">
               {c} ✓
             </li>
           ))}
@@ -223,14 +226,61 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: () => void 
   );
 }
 
+/** The outcome in plain words + PayPal's link when the invoice changed (A12). */
+export function resultLine(card: Card): { text: string; link: string | null } {
+  const r = card.result ?? {};
+  if (card.status === "REJECTED")
+    return { text: r.reply_text ? `Declined — note sent: “${r.reply_text}”` : "Declined", link: null };
+  if (card.payload.mode === "CREDIT")
+    return { text: `Approved as ${formatCents(card.payload.credit_cents ?? 0)} credit`, link: null };
+  if (typeof r.paypal_due_cents === "number")
+    return {
+      text: `PayPal invoice ${card.invoice_no} updated: due ${formatCents(r.paypal_due_cents)}`,
+      link: card.paypal_url,
+    };
+  if (r.reply_text) return { text: `Reply sent: “${r.reply_text}”`, link: null };
+  if (card.kind === "PROMISE_NOTE") return { text: "Noted", link: null };
+  if (card.kind === "REPLY") return { text: "Marked as seen", link: null };
+  return { text: card.status === "DONE" ? "Done" : card.status.toLowerCase(), link: null };
+}
+
+function ResultText({ card }: { card: Card }) {
+  const { text, link } = resultLine(card);
+  return (
+    <>
+      {text}
+      {link && (
+        <>
+          {" · "}
+          <a href={link} target="_blank" rel="noreferrer" className="text-accent underline">
+            View on PayPal
+          </a>
+        </>
+      )}
+    </>
+  );
+}
+
+/** A card the supplier just decided: it stays where it was, with the result (A12). */
+export function DecidedCard({ card }: { card: Card }) {
+  const ok = card.status !== "REJECTED";
+  return (
+    <article
+      aria-live="polite"
+      className={`min-w-0 break-words rounded-card border p-4 ${ok ? "border-success/40 bg-success/5" : "border-line bg-surface"}`}
+    >
+      <p className="text-sm text-muted">{card.buyer.name}</p>
+      <p className="mt-1 font-medium">{card.summary}</p>
+      <p className={`mt-2 font-medium ${ok ? "text-success" : ""}`}>
+        {ok ? "✓ " : ""}
+        <ResultText card={card} />
+      </p>
+    </article>
+  );
+}
+
 /** A decided request, for the buyer page's history (A12 result line). */
 export function DecidedLine({ card }: { card: Card }) {
-  const r = card.result ?? {};
-  let detail = "";
-  if (card.payload.mode === "CREDIT") detail = `${formatCents(card.payload.credit_cents ?? 0)} credit`;
-  else if (typeof r.paypal_due_cents === "number")
-    detail = `PayPal invoice ${card.invoice_no} updated: due ${formatCents(r.paypal_due_cents)}`;
-  else if (r.reply_text) detail = `Replied: “${r.reply_text}”`;
   const tone = card.status === "REJECTED" ? "danger" : card.status === "DONE" ? "success" : "muted";
   return (
     <li className="px-4 py-3">
@@ -238,19 +288,9 @@ export function DecidedLine({ card }: { card: Card }) {
         {card.summary}{" "}
         <StatusChip tone={tone}>{card.status === "DONE" ? "Done" : card.status.toLowerCase()}</StatusChip>
       </p>
-      {detail && (
-        <p className="mt-1 text-sm text-muted">
-          {detail}
-          {card.paypal_url && typeof r.paypal_due_cents === "number" && (
-            <>
-              {" · "}
-              <a href={card.paypal_url} target="_blank" rel="noreferrer" className="text-accent underline">
-                View on PayPal
-              </a>
-            </>
-          )}
-        </p>
-      )}
+      <p className="mt-1 text-sm text-muted">
+        <ResultText card={card} />
+      </p>
     </li>
   );
 }

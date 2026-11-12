@@ -7,6 +7,8 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { longDate } from "@/lib/dates";
+import { paymentMethodLabel, paypalStatusLabel } from "@/lib/labels";
 import { formatCents } from "@/lib/money";
 
 import { MemoGroup } from "../MemoGroup";
@@ -21,22 +23,23 @@ export function BuyerDetail() {
   const { data: d, error } = useSupplierData(() => api.supplier.buyer(Number(id)), reload);
   const [copied, setCopied] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [demo, setDemo] = useState(false);
+  // null until known: the banner must not appear after the page and push buttons down
+  const [demo, setDemo] = useState<boolean | null>(null);
   useEffect(() => {
     api
       .config()
       .then((c) => setDemo(c.demo_mode))
-      .catch(() => undefined);
+      .catch(() => setDemo(false));
   }, []);
 
   if (error) return <p role="alert">{error}</p>;
-  if (!d) return <div aria-busy="true" className="h-48 animate-pulse rounded-card bg-line" />;
+  if (!d || demo === null) return <div aria-busy="true" className="h-48 animate-pulse rounded-card bg-line" />;
   const open = d.proposals.filter((p) => p.status === "PENDING" || p.status === "FAILED");
   const decided = d.proposals.filter((p) => !(p.status === "PENDING" || p.status === "FAILED"));
   const refresh = () => setReload((n) => n + 1);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6 break-words">
       {demo && <SupplierBanner />}
       <p className="text-sm">
         <Link href="/supplier" className="text-accent underline">
@@ -108,7 +111,9 @@ export function BuyerDetail() {
                 <span className="tabular">
                   {formatCents(i.due_cents)} due of {formatCents(i.total_cents)}
                 </span>
-                {i.paypal_status && <StatusChip tone="muted">PayPal: {i.paypal_status}</StatusChip>}
+                {i.paypal_status && (
+                  <StatusChip tone="muted">PayPal: {paypalStatusLabel(i.paypal_status)}</StatusChip>
+                )}
                 {i.mismatch && <StatusChip tone="warning">PayPal differs</StatusChip>}
                 {i.paypal_url && (
                   <a href={i.paypal_url} target="_blank" rel="noreferrer" className="text-accent underline">
@@ -132,9 +137,9 @@ export function BuyerDetail() {
             {d.payments.map((p) => (
               <li key={p.id} className="px-4 py-3 text-sm">
                 <Link href={`/supplier/payments/${p.id}`} className="font-medium text-accent underline">
-                  {formatCents(p.amount_cents)} · {p.source === "OFF_PAYPAL" ? (p.method ?? "").toLowerCase() : "PayPal"}
+                  {formatCents(p.amount_cents)} · {paymentMethodLabel(p.source, p.method)}
                 </Link>
-                <span className="text-muted"> · {p.received_at}</span>
+                <span className="text-muted"> · {longDate(p.received_at)}</span>
                 <span className="mt-1 block text-muted">
                   {p.allocations.map((a) => `${a.invoice_no} ${formatCents(a.amount_cents)}`).join(" · ")}
                 </span>
@@ -164,7 +169,7 @@ export function BuyerDetail() {
         <ul className="divide-y divide-line">
           {d.messages.map((m) => (
             <li key={m.id} className="px-4 py-3 text-sm">
-              “{m.text}” <span className="text-muted">· {m.created_at}{m.label ? ` · ${m.label.toLowerCase().replace("_", " ")}` : ""}</span>
+              “{m.text}” <span className="text-muted">· {longDate(m.created_at)}{m.label ? ` · ${m.label.toLowerCase().replace("_", " ")}` : ""}</span>
             </li>
           ))}
         </ul>

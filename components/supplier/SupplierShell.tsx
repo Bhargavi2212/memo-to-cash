@@ -22,7 +22,8 @@ export function SupplierBanner() {
     };
   }, []);
   return (
-    <p className="rounded-card bg-accent/5 px-4 py-2 text-sm">
+    // two lines reserved on phones so the late link doesn't push the page down
+    <p className="min-h-14 rounded-card bg-accent/5 px-4 py-2 text-sm sm:min-h-0">
       Supplier view of your demo copy
       {token && (
         <>
@@ -78,6 +79,22 @@ export function SampleRows() {
           <td className="tabular px-3 py-2 text-right">{formatCents(s.owed)}</td>
           <td className="tabular px-3 py-2 text-right">{s.oldest}d</td>
         </tr>
+      ))}
+    </>
+  );
+}
+
+/** The same sample rows as stacked cards for phones (< 640 px, UI_UX §6). */
+export function SampleCards() {
+  return (
+    <>
+      {SAMPLES.map((s) => (
+        <li key={s.name} className="px-4 py-3 text-sm text-muted">
+          {s.name} <span className="text-xs">(sample — not on PayPal)</span>
+          <p className="tabular">
+            Owes {formatCents(s.owed)} · oldest {s.oldest}d
+          </p>
+        </li>
       ))}
     </>
   );

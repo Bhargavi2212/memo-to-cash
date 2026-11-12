@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ApiError, api } from "@/lib/api";
+import { useHydrated } from "@/lib/useHydrated";
 
 export function StartDemo() {
   const router = useRouter();
+  const ready = useHydrated();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
@@ -33,7 +35,7 @@ export function StartDemo() {
         <button
           type="button"
           onClick={start}
-          disabled={busy}
+          disabled={busy || !ready}
           className="min-h-11 rounded-card bg-accent px-5 font-medium text-white disabled:opacity-60"
         >
           {busy ? "Starting…" : started ? "Start again" : "Start the demo"}

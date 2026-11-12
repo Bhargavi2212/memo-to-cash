@@ -32,3 +32,8 @@ export function shortDate(iso: string): string {
     timeZone: "UTC",
   });
 }
+
+/** shortDate for values that may be missing or carry a time ("2026-11-11T…") → "—" if none. */
+export function longDate(iso: string | null | undefined): string {
+  return iso ? shortDate(iso.slice(0, 10)) : "—";
+}
