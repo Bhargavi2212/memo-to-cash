@@ -16,7 +16,7 @@ Then the retailer has to work it out by hand. *Which memo is this invoice for? D
 
 The money is slow not because buyers won't pay, but because **the bill doesn't explain itself and can't be paid in one go**.
 
-This is normal trade, not an edge case. In a JA/JBT survey, 39% of US jewelers' store merchandise was memo inventory, and Signet alone held $601.5M of consignment stock. More than half of small businesses have invoices unpaid past 30 days. Large companies solve this with enterprise accounts-receivable portals (Versapay, Billtrust, Upflow), sold on custom contracts. **PayPal Invoicing has no statement and no way to pay several invoices at once** — every payment is one invoice at a time. That gap is what I built for. (Sources: [`docs/RESEARCH.md`](docs/RESEARCH.md).)
+This is normal trade, not an edge case. In a JA/JBT survey, [39% of US jewelers' store merchandise was memo inventory](https://www.jckonline.com/editorial-article/new-study-from-ja-and-jbt/), and Signet alone held [$601.5M of consignment stock](https://rapaport.com/magazine-article/shifting-tides-in-the-us-jewelry-market/). More than half of small businesses have invoices unpaid past 30 days. Large companies solve this with enterprise accounts-receivable portals (Versapay, Billtrust, Upflow), sold on custom contracts. **PayPal Invoicing has no statement and no way to pay several invoices at once** — every payment is one invoice at a time. That gap is what I built for. (Sources: [`docs/RESEARCH.md`](docs/RESEARCH.md).)
 
 ## What it does
 
@@ -39,6 +39,8 @@ This is normal trade, not an edge case. In a JA/JBT survey, 39% of US jewelers' 
 1. **Start the demo.** You get your own private copy, with three buyers and real PayPal sandbox invoices. Northside Jewelers' statement opens.
 2. Open memo **M-201**: S-102 *returned*, S-104 *kept → INV-1038*, S-103 *still with you*. Ask **"Why is S-102 on my bill?"**
 3. **Pay** — $5,000 is prefilled. The preview shows the split. Pay with the sandbox buyer shown on the page. The receipt shows the split, and **View on PayPal** shows the invoices updated.
+
+   <img src="docs/img/paypal-popup.png" alt="One PayPal checkout for several invoices" width="380"> <img src="docs/img/receipt-1.png" alt="The receipt with the split across invoices" width="380">
 4. **See it as Demo Diamond Co.** → the payment is already split on the supplier side. Approve the seeded request (*"scratch on the S-120 solitaire, take $20 off"*). The card shows **"PayPal invoice INV-1051 updated: due $1,400.00 · View on PayPal"**.
 5. Optional: pay one invoice **on PayPal's own invoice page** instead, then come back to our tab. The statement shows it paid, and Pay won't charge it again.
 
@@ -49,7 +51,7 @@ This is normal trade, not an edge case. In a JA/JBT survey, 39% of US jewelers' 
 | **Invoicing v2** — create + send | Every ERP invoice becomes a real PayPal invoice: each kept memo line is a line item, partial payment allowed, due date equal to ours, and the statement link in the invoice note so PayPal's own email carries it. |
 | **Orders v2 + JS SDK** | **One checkout for many invoices.** The order carries the split as items and our payment id as `custom_id`. The capture is re-checked against current balances under a lock. |
 | **Invoicing v2** — record payment | After a capture (or a cheque the supplier records), the money is recorded **on each PayPal invoice**, so PayPal's due amounts match ours. |
-| **Invoicing v2** — update (PUT) | An approved deduction adds a negative line to the PayPal invoice. I proved in the sandbox that this works even on a partly paid invoice, down to exactly $0.00 due. |
+| **Invoicing v2** — update (PUT) | An approved deduction adds a negative line to the PayPal invoice. I proved in the sandbox that this works even on a partly paid invoice, down to exactly $0.00 due ([sandbox results](docs/PAYPAL_SANDBOX.md)). |
 | **Invoicing v2** — remind | An approved reminder is sent by PayPal itself, at most 2 per invoice per day. |
 | **Webhooks** | `INVOICING.INVOICE.PAID`, `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED` and the cancel/refund events, verified with `verify-webhook-signature`. A buyer who pays on PayPal's own invoice page shows up in our ledger about a second later. |
 
@@ -59,6 +61,8 @@ This is normal trade, not an edge case. In a JA/JBT survey, 39% of US jewelers' 
 
 The agent is built so that **the model labels and extracts, and code decides.** It never changes money.
 
+**Why the agent doesn't call PayPal itself:** this is a supplier's money and a buyer's bill. The agent *proposes*, a person *approves*, and only then does the app call PayPal Invoicing — so no model output can ever change an invoice, send a reminder or move a payment on its own.
+
 - **Answers** ("Ask about this statement"): one model call with the buyer's own records in the prompt. Code then checks every answer: every money figure and day count must appear in the records, every SKU / invoice / memo it names must exist, no record ids in the text, at most 600 characters. An answer that fails becomes a safe fallback: "Demo Diamond Co. will answer this".
 - **Messages → proposals:** the model labels the message (return claim, deduction request, payment promise, dispute, question) and extracts fields. **Code** (`backend/agent/actions.py`) decides the action from the records: a deduction must be ≤ the line's price; a repeat request is answered "Already sent"; payment dates are resolved by code, never by the model. The result is a **proposal**. Only the supplier's approval moves money or touches PayPal.
 - **Reminders:** the model drafts; the same validator checks the draft; the supplier edits and approves; PayPal sends it.
@@ -67,7 +71,13 @@ The agent is built so that **the model labels and extracts, and code decides.** 
 
 ### Does the agent work? (eval)
 
-**On 14 held-out messages written by the founder and never seen during development, the agent picked the correct label and action for 11–12 of the 14 in each of 3 passes, vs 5 of 14 for keyword rules (muse-ember-1.0), with 0 unsafe actions; none of its mistakes turned into a wrong money action — each became a message for the supplier to answer.**
+| 14 held-out messages, 3 passes (`muse-ember-1.0`) | Correct label and action |
+|---|---|
+| **Agent** | **11–12 of 14** per pass |
+| Keyword rules | 5 of 14 |
+| **Unsafe actions** (agent) | **0** |
+
+On 14 held-out messages written by the founder and never seen during development, the agent picked the correct label and action for 11–12 of the 14 in each of 3 passes, vs 5 of 14 for keyword rules (muse-ember-1.0), with 0 unsafe actions; none of its mistakes turned into a wrong money action — each became a message for the supplier to answer.
 
 - **Looser measure: action only** (right action, label not required, after code checks and fallbacks): agent 12–13/14 per pass, keyword rules 7/14.
 - **Answers (Job A):** grounded in the records in 2/2 (n = 2) main held-out questions and 1/1 in the "pattern also in dev" group, in every pass. These are counts, not a percentage claim.
@@ -129,7 +139,7 @@ What it changed in the build:
 - `application_context` is deprecated, so the checkout uses `payment_source.<source>.experience_context`.
 - Capture statuses, the error model, and the order and item shapes for one checkout with many invoices.
 
-Its PayPal context is the PayPal Server SDK (Orders, Payments, Vault…). It doesn't cover **Invoicing v2** or **webhook verification**, so I built those from PayPal's docs and proved every behaviour I depend on in the sandbox. Those results are listed in [`CLAUDE.md` §4](CLAUDE.md) and in the probe scripts under `scripts/sandbox/`.
+Its PayPal context is the PayPal Server SDK (Orders, Payments, Vault…). It doesn't cover **Invoicing v2** or **webhook verification**, so I built those from PayPal's docs and proved every behaviour I depend on in the sandbox. Those results are in **[`docs/PAYPAL_SANDBOX.md`](docs/PAYPAL_SANDBOX.md)**, each with the probe script under `scripts/sandbox/` that proves it.
 
 ## Tests
 
@@ -152,19 +162,35 @@ Its PayPal context is the PayPal Server SDK (Orders, Payments, Vault…). It doe
 - **All demo copies share one sandbox buyer account**, so that account sees every judge's sandbox invoices (sandbox only, no real data).
 - **One supplier per deployment**; USD only.
 
-## Run it locally (Windows PowerShell)
+## Run it locally
 
+**The hosted demo is the intended way to test** — it needs no keys. To run it yourself you need Python 3.12, Node 20+, a Postgres database (I use Neon) and PayPal sandbox + Meta Model API keys. Copy [`.env.example`](.env.example) to `.env` and fill in the values (every variable is explained there and in `docs/TRD.md` §7).
+
+**Windows (PowerShell)**
 ```powershell
-conda deactivate                                   # if (base) is shown
 python -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt -r requirements-dev.txt
 npm install
-# create .env with the variables listed in docs/TRD.md §7 (PayPal sandbox keys, a Neon dev URL…)
+copy .env.example .env                             # then fill it in
 alembic upgrade head
 uvicorn backend.main:app --reload --port 8000      # api
 npm run dev                                        # web on :3000, proxies /api to :8000
 python -m backend.worker                           # optional: the background worker
 pytest -q ; npm test                               # tests (integration tests need TEST_DATABASE_URL)
+python -m eval.run_eval                            # agent vs keyword baseline
+```
+
+**macOS / Linux (bash or zsh)**
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+npm install
+cp .env.example .env                               # then fill it in
+alembic upgrade head
+uvicorn backend.main:app --reload --port 8000      # api
+npm run dev                                        # web on :3000, proxies /api to :8000
+python -m backend.worker                           # optional: the background worker
+pytest -q && npm test                              # tests (integration tests need TEST_DATABASE_URL)
 python -m eval.run_eval                            # agent vs keyword baseline
 ```
 
@@ -181,3 +207,8 @@ python -m eval.run_eval                            # agent vs keyword baseline
 | `scripts/sandbox/` | Probes against the real PayPal sandbox |
 
 All names and data in the demo are made up: Demo Diamond Co., Northside Jewelers, Harbor Gems, Lakeside Fine Jewelry.
+
+---
+
+**Team:** Bhargavi — product, research, the PayPal sandbox work, the eval set and its labels, and the build. _(Add anyone else who worked on it.)_
+**Licence:** [MIT](LICENSE).
