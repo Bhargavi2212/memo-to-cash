@@ -37,8 +37,24 @@ def _now() -> float:
     return time.monotonic()
 
 
+# One token fetch at a time per (base_url, client_id): parallel calls on a cold cache wait for
+# the first fetch instead of each fetching their own (phase M: 7 at once). A lock belongs to an
+# event loop, so it's recreated when the loop changes (tests run many loops).
+_token_locks: dict[tuple[str, str], tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+
+
+def _token_lock(key: tuple[str, str]) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    held = _token_locks.get(key)
+    if held is None or held[0] is not loop:
+        held = (loop, asyncio.Lock())
+        _token_locks[key] = held
+    return held[1]
+
+
 def clear_token_cache() -> None:
     _tokens.clear()
+    _token_locks.clear()
 
 
 class PayPalNotConfiguredError(RuntimeError):
@@ -129,6 +145,15 @@ class PayPal:
         cached = _tokens.get(key)
         if cached and not force and _now() < cached[1]:
             return cached[0]
+        async with _token_lock(key):
+            cached = _tokens.get(key)  # fetched by another call while we waited
+            if cached and not force and _now() < cached[1]:
+                return cached[0]
+            return await self._fetch_token(http, key, client_id, secret)
+
+    async def _fetch_token(
+        self, http: httpx.AsyncClient, key: tuple[str, str], client_id: str, secret: str
+    ) -> str:
         start = _now()
         resp = await http.post(
             "/v1/oauth2/token",

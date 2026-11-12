@@ -230,6 +230,7 @@ def overview(session: Session, scope: Scope, today: date, settings: Settings) ->
             "owed_cents": s.owed_cents,
             "oldest_age_days": s.oldest_age_days,
             "past_due_cents": s.past_due_cents,
+            "paypal_setup": s.paypal_setup,
             "credit_cents": s.credit_cents,
             "last_payment": (
                 {"amount_cents": last.amount_cents, "received_at": last.received_at}
@@ -265,7 +266,8 @@ def overview(session: Session, scope: Scope, today: date, settings: Settings) ->
     recent.sort(key=lambda r: (r["received_at"] or date.min, r["id"]), reverse=True)
     return {
         "totals": totals,
-        "buyers": buyers,
+        # largest owed first, then name: Northside, Lakeside, Harbor in a demo copy (PM-plan G8)
+        "buyers": sorted(buyers, key=lambda r: (-r["owed_cents"], r["name"])),
         "pending": [c.model_dump() for c in proposal_cards(session, scope, ["PENDING", "FAILED"])],
         "recent_payments": recent[:20],
     }
@@ -351,6 +353,7 @@ def buyer_detail(
         "past_due_cents": s.past_due_cents,
         "oldest_age_days": s.oldest_age_days,
         "credit_cents": s.credit_cents,
+        "paypal_setup": s.paypal_setup,
         "memos": [m.model_dump() for m in s.memos],
         "invoices": invoices,
         "messages": messages,
@@ -359,18 +362,23 @@ def buyer_detail(
     }
 
 
-def whoami(session: Session, settings: Settings, cookie: str | None) -> str | None:
-    """The statement token of the cookie's own ready copy (A10, R10), else None."""
+def whoami(session: Session, settings: Settings, cookie: str | None) -> dict[str, Any]:
+    """The cookie's own ready copy (A10, R10): `statement_token` = its Northside buyer (landing /
+    back link, PM-plan G3), `buyers` = all three with their tokens (P3 §M M4). Else empty."""
+    none: dict[str, Any] = {"statement_token": None, "buyers": []}
     if not settings.demo_mode:
-        return None
+        return none
     sess = demo.read_demo_cookie(cookie, settings)
     if not sess:
-        return None
-    return session.scalars(
-        select(Buyer.statement_token)
+        return none
+    rows = session.execute(
+        select(Buyer.id, Buyer.name, Buyer.statement_token)
         .where(Buyer.demo_session == sess, Buyer.demo_ready.is_(True))
-        .order_by(Buyer.id.desc())
-    ).first()
+        .order_by(Buyer.name != demo.BUYER_NAME, Buyer.name)  # Northside first
+    ).all()
+    buyers = [{"id": i, "name": n, "statement_token": t} for i, n, t in rows]
+    north = next((b["statement_token"] for b in buyers if b["name"] == demo.BUYER_NAME), None)
+    return {"statement_token": north, "buyers": buyers}
 
 
 def payment_summary(session: Session, payment_id: int) -> dict[str, Any]:

@@ -43,6 +43,9 @@ DECLINED_MSG = "PayPal declined that payment method. Please try another one — 
 CHANGED = "Your statement changed — please review."
 
 
+NOT_READY_MSG = "These invoices are still being set up on PayPal — try again in a moment."
+
+
 class PaymentError(Exception):
     """Mapped by routes to {error:{code,message,paypal_debug_id?}} (P2 D13)."""
 
@@ -80,6 +83,8 @@ def _order_txn(
         buyer = find_buyer(s, token)
         lock_buyer(s, buyer.id)
         rows, open_ = open_invoices(s, buyer.id)
+        if any(r.ledger_status == "DRAFT" for r in rows):  # P3 §M M9: never pay before mirrored
+            raise PaymentError(409, "PAYPAL_NOT_READY", NOT_READY_MSG)
         amount, selected = resolve_request(open_, invoice_ids, amount_cents)
         split = split_payment(amount, open_, selected)
         by_id = {i.id: i for i in rows}
@@ -710,6 +715,8 @@ def record_off_paypal(
                 raise RecordError(409, "CLIENT_UID_REUSED", "That request id belongs elsewhere")
             return existing.id, True
         rows, open_ = open_invoices(s, buyer_id)
+        if any(r.ledger_status == "DRAFT" for r in rows):  # P3 §M M9
+            raise RecordError(409, "PAYPAL_NOT_READY", NOT_READY_MSG)
         amount, selected = resolve_request(open_, invoice_ids, amount_cents)
         split = split_payment(amount, open_, selected)
         p = Payment(

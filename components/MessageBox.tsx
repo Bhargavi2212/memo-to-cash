@@ -5,12 +5,8 @@
 import { useState } from "react";
 
 import { ApiError, api, type MessageResult } from "@/lib/api";
+import { messageChips } from "@/lib/chips";
 
-const DEMO_CHIPS = [
-  "S-104 has a chipped stone, please take $50 off",
-  "I returned S-103 last week",
-  "I'll pay the rest on Friday",
-];
 const MAX = 2000;
 
 type State =
@@ -21,10 +17,12 @@ type State =
 
 export function MessageBox({
   token,
+  buyerName,
   demoMode,
   onSent,
 }: {
   token: string;
+  buyerName: string;
   demoMode: boolean;
   onSent: () => void;
 }) {
@@ -80,7 +78,7 @@ export function MessageBox({
       </p>
       {demoMode && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {DEMO_CHIPS.map((c) => (
+          {messageChips(buyerName).map((c) => (
             <button
               key={c}
               type="button"

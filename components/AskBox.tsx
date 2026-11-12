@@ -5,9 +5,9 @@
 import { useState } from "react";
 
 import { ApiError, api, type AskResult, type Statement } from "@/lib/api";
+import { askChips } from "@/lib/chips";
 import { recordChip } from "@/lib/records";
 
-const CHIPS = ["Why is S-102 on my bill?", "What do I owe for M-207?"];
 const MAX = 500;
 
 type State =
@@ -60,7 +60,7 @@ export function AskBox({
         Ask about this statement
       </h2>
       <div className="mt-3 flex flex-wrap gap-2">
-        {CHIPS.map((c) => (
+        {askChips(statement.buyer.name).map((c) => (
           <button
             key={c}
             type="button"

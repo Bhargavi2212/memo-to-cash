@@ -20,7 +20,7 @@ from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import agent, payments
+from backend.services import agent, mirror, payments
 from backend.services import statement as svc
 
 router = APIRouter(prefix="/api")
@@ -226,3 +226,29 @@ async def message(
     except svc.StatementNotFoundError:
         return _error(404, *NOT_FOUND)
     return MessageOut(**asdict(r))
+
+
+class SetupOut(BaseModel):
+    paypal_setup: str  # READY | SETTING_UP | FAILED
+
+
+def _buyer_id(session_factory: Callable[[], Session], token: str) -> int:
+    with session_factory() as s:
+        return svc.find_buyer(s, token).id
+
+
+@router.post("/statement/{token}/setup", response_model=SetupOut)
+async def setup(
+    token: str,
+    pp: Annotated[PayPal, Depends(get_paypal)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+):
+    """P3 §M M9: a buyer whose invoices aren't on PayPal yet — run or join its setup, wait
+    up to 10 s, answer the state. READY → at once, no PayPal call."""
+    try:
+        buyer_id = await run_in_threadpool(_buyer_id, session_factory, token)
+    except svc.StatementNotFoundError:
+        return _error(404, *NOT_FOUND)
+    state = await mirror.ensure_setup(buyer_id, pp, settings, session_factory)
+    return SetupOut(paypal_setup=state)

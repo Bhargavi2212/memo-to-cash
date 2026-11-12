@@ -213,3 +213,19 @@ async def test_network_errors_are_transient_not_crashes(settings, fresh_cache):
     with pytest.raises(pp.PayPalError) as e:
         await make(settings, rec).request("GET", "/x")
     assert e.value.transient and e.value.name == "NETWORK_ERROR" and len(rec.calls) == 4
+
+
+async def test_concurrent_cold_calls_fetch_the_token_once(settings):
+    """Phase M (PM-plan B3): 7 parallel invoice calls on a cold cache used to fetch 7 tokens."""
+    import asyncio
+
+    rec = Recorder(*[ok() for _ in range(7)])
+
+    async def slow_token(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/oauth2/token":
+            await asyncio.sleep(0.05)  # a real round trip, so the calls overlap
+        return rec(request)
+
+    c = pp.PayPal(settings, transport=httpx.MockTransport(slow_token))
+    await asyncio.gather(*(c.request("GET", "/v2/invoicing/invoices/INV2-1") for _ in range(7)))
+    assert rec.token_calls == 1 and len(rec.calls) == 7

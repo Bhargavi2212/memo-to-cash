@@ -6,7 +6,7 @@ HTTP only: the work is in services/demo.py. Public route, DEMO_MODE only.
 from collections.abc import Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from backend.agent import llm
 from backend.core.config import Settings, get_settings
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import demo
+from backend.services import demo, mirror
 
 router = APIRouter(prefix="/api")
 
@@ -36,6 +36,7 @@ def _error(status: int, code: str, message: str, debug_id: str | None = None) ->
 @router.post("/demo/start", response_model=DemoStartOut)
 async def demo_start(
     request: Request,
+    background: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
     pp: Annotated[PayPal, Depends(get_paypal)],
     session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
@@ -50,6 +51,8 @@ async def demo_start(
         started = await demo.start_demo(settings, pp, session_factory, ip=ip, client=client)
     except demo.DemoError as e:
         return _error(e.status, e.code, e.message, e.debug_id)
+    # Harbor + Lakeside go on PayPal right after the response (P3 §M M2)
+    background.add_task(mirror.setup_buyers, started.others, pp, settings, session_factory)
     resp = JSONResponse(
         DemoStartOut(
             statement_token=started.statement_token, buyer_id=started.buyer_id, ms=started.ms
@@ -64,6 +67,7 @@ async def demo_start(
         httponly=True,
         samesite="lax",
     )
+    resp.background = background
     return resp
 
 
@@ -72,11 +76,10 @@ def demo_whoami(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> dict[str, str | None]:
-    """The statement token of the cookie's own demo copy (P3 A10, R10): the "See it as Demo
-    Diamond Co." link shows only on that copy's pages. No cookie / not demo mode → null."""
+) -> dict[str, Any]:
+    """The cookie's own demo copy (P3 A10, R10; P3 §M M4): Northside's statement token plus all
+    three buyers; the "See it as Demo Diamond Co." link shows only on that copy's statements.
+    No cookie / not demo mode → `{statement_token: null, buyers: []}`."""
     from backend.services import supplier
 
-    return {
-        "statement_token": supplier.whoami(session, settings, request.cookies.get(demo.COOKIE_NAME))
-    }
+    return supplier.whoami(session, settings, request.cookies.get(demo.COOKIE_NAME))

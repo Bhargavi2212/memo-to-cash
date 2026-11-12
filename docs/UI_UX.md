@@ -73,18 +73,18 @@ Amount, date, PayPal capture ID, list "INV-1038 $3,500 → paid in full", "INV-1
 ### 4.3 Supplier overview `/supplier` (desktop)
 ```
 ┌──────────────────────────────────────────────┬───────────────────────────┐
-│ Open $8,420   Past due $3,500   Paid this week $0 │ Needs your decision (1) │
+│ Open $16,680  Past due $7,000   Paid this week $0 │ Needs your decision (1) │
 ├──────────────────────────────────────────────┤ ┌───────────────────────┐ │
 │ Buyer          Out  Kept  Ret.  Owed   Oldest │ │ Northside: "scratch on│ │
 │ Northside Jew.  2    5    5   $8,420   48d ⚠ │ │ the S-120 solitaire,  │ │
-│ Harbor Gems (sample)  …   $2,300   12d       │ │ take $20 off"         │ │
-│ Lakeside (sample)     …   $5,960   31d       │ │ Checked: S-120 kept on│ │
+│ Lakeside F. J.  1    4    1   $5,960   31d ⚠ │ │ take $20 off"         │ │
+│ Harbor Gems     1    2    2   $2,300   12d   │ │ Checked: S-120 kept on│ │
 ├──────────────────────────────────────────────┤ │ INV-1051, price $1,420│ │
 │ Recent payments                               │ │ → −$20 on INV-1051    │ │
 │ <date>  Northside  $5,000  split 2 invoices ✓│ │ [Approve][Edit][Reject]│ │
 └──────────────────────────────────────────────┴───────────────────────────┘
 ```
-Demo mode: the overview shows the visitor's own Northside Jewelers copy plus two read-only **sample rows** (Harbor Gems, Lakeside Fine Jewelry). They are a **static constant in the frontend** (`components/supplier/SampleRows.tsx`), rendered only when `DEMO_MODE`, labelled "sample — not on PayPal", not clickable, not in the database. Header totals count only real rows. Header uses **"Past due"** (any overdue), not ">30d".
+Demo mode: the overview shows the visitor's own copy — **three real buyers** (Northside Jewelers, Lakeside Fine Jewelry, Harbor Gems; P3 §M), each with PayPal invoices, a buyer page and its own statement link. No sample rows. Buyers are ordered by owed, largest first, then name. Header uses **"Past due"** (any overdue), not ">30d".
 
 ### 4.3b Supplier buyer detail `/supplier/buyers/[id]`
 Memos and lines (same grouping as the buyer sees), invoices with PayPal status, messages and proposals, payments. Buttons: **Copy statement link** · **Record payment** (modal: method Cheque/Wire/Other, reference, amount, optional invoices, split preview, Confirm).

@@ -13,6 +13,7 @@ import { MemoGroup } from "./MemoGroup";
 import { MessageBox } from "./MessageBox";
 import { Notices } from "./Notices";
 import { PayPanel } from "./PayPanel";
+import { PaypalSetup } from "./PaypalSetup";
 import { SeeAsSupplier } from "./SeeAsSupplier";
 import { YourRequests } from "./YourRequests";
 
@@ -186,6 +187,22 @@ export function Statement() {
         <p className="rounded-card border border-line bg-surface p-6 text-center font-medium">
           Nothing owed — thank you.
         </p>
+      ) : s.paypal_setup !== "READY" ? (
+        // P3 §M M9: never payable before the invoices are on PayPal
+        <section aria-label="Pay" className="space-y-3">
+          <PaypalSetup
+            run={() => api.setup(token)}
+            onReady={() => setReload((n) => n + 1)}
+            action="Pay"
+          />
+          <button
+            type="button"
+            disabled
+            className="min-h-11 w-full rounded-card bg-accent px-4 font-medium text-white opacity-50"
+          >
+            Pay with PayPal
+          </button>
+        </section>
       ) : (
         <PayPanel
           key={s.invoices.map((i) => `${i.id}:${i.due_cents}`).join(",")}
@@ -204,6 +221,7 @@ export function Statement() {
       <AskBox token={token} statement={s} onFocusRecord={setFocus} />
       <MessageBox
         token={token}
+        buyerName={s.buyer.name}
         demoMode={config.demo_mode}
         onSent={() => setReload((n) => n + 1)}
       />

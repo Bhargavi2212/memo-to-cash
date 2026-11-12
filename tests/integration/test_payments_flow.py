@@ -65,6 +65,10 @@ def seed(db, email="buyer@example.com"):
     assert res.ok
     b = db.get(Buyer, res.buyer_ids[0])
     b.demo_ready = True
+    for i in db.scalars(select(Invoice).where(Invoice.buyer_id == b.id)):
+        i.ledger_status = (
+            "OPEN"  # on PayPal, as the mirror leaves it (phase M: DRAFT can't be paid)
+        )
     db.commit()
     return b
 

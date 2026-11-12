@@ -92,19 +92,75 @@ _INVOICES = [
 ]
 
 
-def build_csv(d: date, buyer_email: str) -> str:
-    """The §Seed dataset as import CSV, dates relative to D."""
-    out = io.StringIO()
-    w = csv.DictWriter(out, fieldnames=COLUMNS, lineterminator="\n")
-    w.writeheader()
-    w.writerow({"record_type": "BUYER", "buyer_name": BUYER_NAME, "buyer_email": buyer_email})
-    for memo_no, sent, lines in _MEMOS:
+# Phase M (P3 §M, IMPLEMENTATION_PLAN §Seed): two more real buyers in every demo copy. Memo, SKU
+# and invoice numbers are unique across the copy. No seeded message for these two.
+HARBOR = "Harbor Gems"
+_HARBOR_MEMOS = [
+    (
+        "M-215",
+        -30,
+        [
+            ("S-130", "Marquise 0.80ct", "1450", ("KEPT", "INV-1055")),
+            ("S-131", "Sapphire ring", "1200", ("RETURNED", -14, "R-330")),
+            ("S-132", "Gold chain", "400", ("OUT", 20)),
+        ],
+    ),
+    (
+        "M-219",
+        -10,
+        [
+            ("S-135", "Drop earrings", "850", ("KEPT", "INV-1058")),
+            ("S-136", "Opal pendant", "600", ("RETURNED", -3, "R-337")),
+        ],
+    ),
+]
+_HARBOR_INVOICES = [("INV-1055", "M-215", -12, 18), ("INV-1058", "M-219", -4, 26)]
+
+LAKESIDE = "Lakeside Fine Jewelry"
+_LAKESIDE_MEMOS = [
+    (
+        "M-205",
+        -60,
+        [
+            ("S-140", "Princess 1.10ct", "2600", ("KEPT", "INV-1040")),
+            ("S-141", "Pearl strand", "900", ("KEPT", "INV-1040")),
+            ("S-142", "Ruby studs", "1100", ("RETURNED", -35, "R-314")),
+        ],
+    ),
+    (
+        "M-216",
+        -25,
+        [
+            ("S-150", "Eternity band", "1700", ("KEPT", "INV-1056")),
+            ("S-151", "Locket", "760", ("KEPT", "INV-1056")),
+            ("S-152", "Aquamarine", "1250", ("OUT", 15)),
+        ],
+    ),
+]
+_LAKESIDE_INVOICES = [("INV-1040", "M-205", -31, -1), ("INV-1056", "M-216", -8, 22)]
+
+
+def plus_address(email: str, tag: str) -> str:
+    """`judge@x.com` → `judge+tag@x.com`: the importer keys buyers by email (PM-plan G1)."""
+    local, _, domain = email.partition("@")
+    return f"{local}+{tag}@{domain}"
+
+
+_Memos = list[tuple[str, int, list[tuple[str, str, str, tuple[Any, ...]]]]]
+_Invoices = list[tuple[str, str, int, int]]
+
+
+def _write_buyer(
+    w: "csv.DictWriter[str]", d: date, name: str, email: str, memos: _Memos, invoices: _Invoices
+) -> None:
+    w.writerow({"record_type": "BUYER", "buyer_name": name, "buyer_email": email})
+    for memo_no, sent, lines in memos:
         due_back = [s[1] for *_, s in lines if s[0] == "OUT"]
         w.writerow(
             {
                 "record_type": "MEMO",
                 "memo_no": memo_no,
-                "buyer_email": buyer_email,
+                "buyer_email": email,
                 "sent_on": offset(d, sent).isoformat(),
                 "due_back_on": offset(d, max(due_back)).isoformat() if due_back else "",
             }
@@ -130,7 +186,7 @@ def build_csv(d: date, buyer_email: str) -> str:
                         "return_ref": state[2],
                     }
                 )
-    for inv_no, memo_no, issued, due in _INVOICES:
+    for inv_no, memo_no, issued, due in invoices:
         w.writerow(
             {
                 "record_type": "INVOICE",
@@ -140,7 +196,7 @@ def build_csv(d: date, buyer_email: str) -> str:
                 "due_on": offset(d, due).isoformat(),
             }
         )
-        for m_no, _, lines in _MEMOS:
+        for m_no, _, lines in memos:
             for sku, *_, state in lines:
                 if m_no == memo_no and state == ("KEPT", inv_no):
                     w.writerow(
@@ -151,7 +207,33 @@ def build_csv(d: date, buyer_email: str) -> str:
                             "sku": sku,
                         }
                     )
+
+
+def _csv(d: date, buyers: list[tuple[str, str, _Memos, _Invoices]]) -> str:
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=COLUMNS, lineterminator="\n")
+    w.writeheader()
+    for name, email, memos, invoices in buyers:
+        _write_buyer(w, d, name, email, memos, invoices)
     return out.getvalue()
+
+
+def build_csv(d: date, buyer_email: str) -> str:
+    """The §Seed dataset (Northside only) as import CSV, dates relative to D. The agent eval's
+    Facts are built from this — keep it byte-identical (PM-plan G2)."""
+    return _csv(d, [(BUYER_NAME, buyer_email, _MEMOS, _INVOICES)])
+
+
+def build_demo_csv(d: date, buyer_email: str) -> str:
+    """A demo copy: Northside plus Harbor Gems and Lakeside Fine Jewelry (P3 §M, M1)."""
+    return _csv(
+        d,
+        [
+            (BUYER_NAME, buyer_email, _MEMOS, _INVOICES),
+            (HARBOR, plus_address(buyer_email, "harbor"), _HARBOR_MEMOS, _HARBOR_INVOICES),
+            (LAKESIDE, plus_address(buyer_email, "lakeside"), _LAKESIDE_MEMOS, _LAKESIDE_INVOICES),
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +282,7 @@ class DemoStart:
     ms: int
     cookie: str
     demo_session: str
+    others: list[int]  # Harbor + Lakeside: mirrored after the response (P3 §M M2)
 
 
 def missing_settings(settings: Settings) -> list[str]:
@@ -282,25 +365,28 @@ def check_rate(session_factory: Callable[[], Session], ip_key: str, now: datetim
 
 def _create_copy(
     session_factory: Callable[[], Session], settings: Settings, demo_session: str, today: date
-) -> tuple[int, str, Any, bool]:
-    """Importer → the seed *message only*, one transaction (P4 D13). Returns (buyer id, token,
-    the buyer's Facts for the triage, whether the global LLM cap allows a call)."""
+) -> tuple[int, str, list[int], Any, bool]:
+    """Importer (three buyers, P3 §M) → the seed *message only* on Northside, one transaction
+    (P4 D13). Returns (Northside's id, its token, every buyer id in the copy, Northside's Facts
+    for the triage, whether the global LLM cap allows a call)."""
     from backend.agent import caps
     from backend.agent.facts import facts_for_buyer
 
     assert settings.sandbox_buyer_email
     with session_factory() as s, s.begin():
         res = import_csv(
-            s, build_csv(today, settings.sandbox_buyer_email), demo_session=demo_session
+            s, build_demo_csv(today, settings.sandbox_buyer_email), demo_session=demo_session
         )
         if not res.ok:  # the seed is ours: this is a bug, not a user error
             raise RuntimeError(f"seed import failed: {res.errors}")
-        buyer = s.get(Buyer, res.buyer_ids[0])
-        assert buyer is not None
+        buyer = s.scalars(
+            select(Buyer).where(Buyer.id.in_(res.buyer_ids), Buyer.name == BUYER_NAME)
+        ).one()
         s.add(Message(buyer_id=buyer.id, text=SEED_MESSAGE, kind="MESSAGE",
                       ai_result={"seeded": True}))  # fmt: skip
         allowed = caps.take_unit(s, today, None)  # demo start counts toward global only (D9)
-        return buyer.id, buyer.statement_token, facts_for_buyer(s, buyer.id, today), allowed
+        facts = facts_for_buyer(s, buyer.id, today)
+        return buyer.id, buyer.statement_token, list(res.buyer_ids), facts, allowed
 
 
 def _seed_proposal(s: Session, buyer_id: int, msg: Message) -> Proposal:
@@ -367,7 +453,10 @@ def _finish(
         audit.log(s, actor, action, ref="INV-1051", detail={"buyer_id": buyer_id,
                   "proposal_id": prop.id, "triage": tri.action.code if tri.action else
                   tri.fallback_reason})  # fmt: skip
-        buyer.demo_ready = True
+        # the copy becomes reachable once Northside is on PayPal; the others show "Setting up on
+        # PayPal…" until their background setup finishes (M5, M9)
+        for b in s.scalars(select(Buyer).where(Buyer.demo_session == buyer.demo_session)):
+            b.demo_ready = True
         _bump(s, ip_key, bucket)
         total = _bump(s, "global", bucket)
         audit.log(
@@ -412,7 +501,7 @@ async def start_demo(
     await run_in_threadpool(check_rate, session_factory, ip_key, when)
 
     demo_session = secrets.token_urlsafe(16)
-    buyer_id, token, facts, allowed = await run_in_threadpool(
+    buyer_id, token, buyer_ids, facts, allowed = await run_in_threadpool(
         _create_copy, session_factory, settings, demo_session, today_ny(when)
     )
     # D13: the seed message goes through the real triage while PayPal mirrors the invoices
@@ -453,6 +542,7 @@ async def start_demo(
         ms=int((time.perf_counter() - started) * 1000),
         cookie=make_demo_cookie(demo_session, settings),
         demo_session=demo_session,
+        others=[b for b in buyer_ids if b != buyer_id],
     )
 
 

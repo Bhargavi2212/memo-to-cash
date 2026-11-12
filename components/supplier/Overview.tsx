@@ -1,6 +1,6 @@
 "use client";
-// Supplier overview `/supplier` (P3 A2, A12; UI_UX §4.3, §6): totals, buyers (+ sample rows in
-// demo mode), "Needs your decision" and recent payments with their split. Ledger only.
+// Supplier overview `/supplier` (P3 A2, A12; UI_UX §4.3, §6): totals, buyers (all real, P3 §M),
+// "Needs your decision" and recent payments with their split. Ledger only.
 // A decided card stays in place with its result ("PayPal invoice INV-1051 updated: due
 // $1,400.00 · View on PayPal") — the judged moment. Tables become stacked cards below 640 px.
 import Link from "next/link";
@@ -12,12 +12,22 @@ import { paymentMethodLabel } from "@/lib/labels";
 import { formatCents } from "@/lib/money";
 
 import { type Decided, DecidedCard, ProposalCard } from "./ProposalCard";
-import { SampleCards, SampleRows, SupplierBanner, useSupplierData } from "./SupplierShell";
+import { SupplierBanner, useSupplierData } from "./SupplierShell";
 
 type Buyer = SupplierOverview["buyers"][number];
 
 function oldest(b: Buyer): string {
   return b.owed_cents > 0 ? `${b.oldest_age_days}d${b.past_due_cents > 0 ? " ⚠" : ""}` : "—";
+}
+
+/** A buyer not yet on PayPal (P3 §M M9): the row still opens; the buyer page finishes or retries. */
+function SetupNote({ b }: { b: Buyer }) {
+  if (b.paypal_setup === "READY") return null;
+  return (
+    <span className="block text-xs text-muted">
+      {b.paypal_setup === "FAILED" ? "Couldn't set up on PayPal — open to retry" : "Setting up on PayPal…"}
+    </span>
+  );
 }
 
 export function Overview() {
@@ -81,6 +91,7 @@ export function Overview() {
                   <Link href={`/supplier/buyers/${b.id}`} className="font-medium text-accent underline">
                     {b.name}
                   </Link>
+                  <SetupNote b={b} />
                   <p className="tabular mt-1">
                     Owes {formatCents(b.owed_cents)} · oldest {oldest(b)}
                   </p>
@@ -90,7 +101,6 @@ export function Overview() {
                   </p>
                 </li>
               ))}
-              {demo && <SampleCards />}
             </ul>
             <table className="mt-2 hidden w-full text-sm sm:table">
               <thead className="text-left text-muted">
@@ -110,6 +120,7 @@ export function Overview() {
                       <Link href={`/supplier/buyers/${b.id}`} className="font-medium text-accent underline">
                         {b.name}
                       </Link>
+                      <SetupNote b={b} />
                       {b.promise && (
                         <span className="block text-xs text-muted">Promised {longDate(b.promise)}</span>
                       )}
@@ -123,7 +134,6 @@ export function Overview() {
                     </td>
                   </tr>
                 ))}
-                {demo && <SampleRows />}
               </tbody>
             </table>
             {data.buyers.length === 0 && (

@@ -16,6 +16,7 @@ The id is stored as soon as create succeeds, even if send then fails (D5).
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -259,3 +260,90 @@ async def mirror_invoices(
     sem = asyncio.Semaphore(CONCURRENCY)
     outcomes = await asyncio.gather(*(_mirror_one(pp, j, sem, day) for j in jobs))
     return await run_in_threadpool(_write, session_factory, jobs, list(outcomes), settings, day)
+
+
+# ---------------------------------------------------------------------------
+# Per-buyer PayPal setup (P3 §M M9): Harbor/Lakeside are mirrored after the demo start
+# ---------------------------------------------------------------------------
+
+SETUP_WAIT_S = 10.0  # how long `/setup` waits for the running setup before answering
+SETUP_DEADLINE_S = 30.0  # one setup run never hangs longer than this
+_setups: dict[int, "asyncio.Task[None]"] = {}
+log = logging.getLogger("mirror")
+
+
+def setup_state(rows: list[tuple[str, str | None]]) -> str:
+    """READY (no DRAFT invoice) · FAILED (a DRAFT with a mirror error) · SETTING_UP — from
+    (ledger_status, mirror_error) of the buyer's invoices; no migration (M9)."""
+    drafts = [err for status, err in rows if status == "DRAFT"]
+    if not drafts:
+        return "READY"
+    return "FAILED" if any(drafts) else "SETTING_UP"
+
+
+def buyer_setup_state(session: Session, buyer_id: int) -> str:
+    rows = session.execute(
+        select(Invoice.ledger_status, Invoice.mirror_error).where(
+            Invoice.buyer_id == buyer_id, Invoice.ledger_status != "CANCELLED"
+        )
+    ).all()
+    return setup_state([(st, err) for st, err in rows])
+
+
+def _state(session_factory: Callable[[], Session], buyer_id: int) -> str:
+    with session_factory() as s:
+        return buyer_setup_state(s, buyer_id)
+
+
+async def _setup(buyer_id: int, pp: PayPal, settings: Settings,
+                 session_factory: Callable[[], Session]) -> None:  # fmt: skip
+    try:
+        res = await asyncio.wait_for(
+            mirror_invoices(buyer_id, pp, settings, session_factory), timeout=SETUP_DEADLINE_S
+        )
+        if not res.ok:
+            _, err = res.errors[0]
+            log.warning("setup buyer=%s failed: %s debug_id=%s", buyer_id, err.name, err.debug_id)
+    except Exception as e:  # logged; the page offers Retry (M9)
+        log.warning("setup buyer=%s failed: %s", buyer_id, type(e).__name__)
+
+
+def start_setup(
+    buyer_id: int, pp: PayPal, settings: Settings, session_factory: Callable[[], Session]
+) -> "asyncio.Task[None]":
+    """The running setup for this buyer, or a new one: one at a time per buyer, later callers
+    join it (M9). Not the money lock — CLAUDE.md §6 keeps PayPal calls out of it; PayPal's
+    unique invoice number is the cross-process backstop (duplicate → search and adopt)."""
+    loop = asyncio.get_running_loop()
+    task = _setups.get(buyer_id)
+    if task is not None and not task.done() and task.get_loop() is loop:
+        return task
+    task = loop.create_task(_setup(buyer_id, pp, settings, session_factory))
+    _setups[buyer_id] = task
+    task.add_done_callback(lambda t: _setups.pop(buyer_id, None) if _setups.get(buyer_id) is t
+                           else None)  # fmt: skip
+    return task
+
+
+async def ensure_setup(
+    buyer_id: int,
+    pp: PayPal,
+    settings: Settings,
+    session_factory: Callable[[], Session],
+    wait_s: float = SETUP_WAIT_S,
+) -> str:
+    """READY at once with no PayPal call; otherwise run or join the setup, wait ≤ wait_s, and
+    return the state then (M9)."""
+    if await run_in_threadpool(_state, session_factory, buyer_id) == "READY":
+        return "READY"
+    task = start_setup(buyer_id, pp, settings, session_factory)
+    await asyncio.wait({task}, timeout=wait_s)
+    return await run_in_threadpool(_state, session_factory, buyer_id)
+
+
+async def setup_buyers(
+    buyer_ids: list[int], pp: PayPal, settings: Settings, session_factory: Callable[[], Session]
+) -> None:
+    """BackgroundTask after the demo start: Harbor and Lakeside in parallel (M2)."""
+    tasks = [start_setup(b, pp, settings, session_factory) for b in buyer_ids]
+    await asyncio.gather(*tasks)

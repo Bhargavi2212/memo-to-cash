@@ -181,3 +181,19 @@ def test_payment_detail_shows_split_stored_paypal_values_and_timeline(clients, d
     start(b, "9.9.9.2")
     assert b.get(f"/api/supplier/payments/{pid}").status_code == 404  # another visitor
     assert a.get("/api/supplier/payments/999999").status_code == 404
+
+
+def test_a_cheque_on_harbor_splits_oldest_first(clients, db, fake):
+    """P3 §M M6/M7: Harbor Gems works like Northside — INV-1055 ($1,450, older) first."""
+    a, _ = clients
+    start(a, "8.2.2.1")
+    harbor = next(x for x in a.get("/api/supplier/overview").json()["buyers"]
+                  if x["name"] == "Harbor Gems")  # fmt: skip
+    r = record(a, harbor["id"], amount_cents=200000)
+    assert r.status_code == 200, r.text
+    assert [(x["invoice_no"], x["amount_cents"]) for x in r.json()["allocations"]] == [
+        ("INV-1055", 145000), ("INV-1058", 55000)]  # fmt: skip
+    over = record(a, harbor["id"], amount_cents=30001)  # $300.01 > the $300.00 left
+    assert over.status_code == 422 and over.json()["error"]["code"] == "AMOUNT_EXCEEDS_SELECTED"
+    s = statement(a, db, harbor["id"])
+    assert s["owed_cents"] == 30000

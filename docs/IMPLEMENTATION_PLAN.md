@@ -116,4 +116,34 @@ Supplier "Demo Diamond Co." · Buyer "Northside Jewelers" (email = `SANDBOX_BUYE
 Totals: 12 lines = 5 kept, 5 returned, 2 out · owed **$8,420** · oldest unpaid 48 days.
 Seeded message + pending proposal: "There's a small scratch on the S-120 solitaire, please take $20 off." → ADJUSTMENT −$20 on **INV-1051** (evidence: S-120 kept on INV-1051, price $1,420, due $1,420). Chosen so it stays valid after the judge pays $5,000 (which clears INV-1038 and part of INV-1042; INV-1051 stays unpaid, so no edit of a paid or part-paid invoice is needed).
 **If the judge pays the full $8,420** (default selection), INV-1051 is paid and the seeded −$20 can't apply as a deduction: P2 prefills $5,000 in demo mode and **P3 approval turns it into "record a $20 credit"** instead of an error (P2 D20).
+**Two more buyers in every demo copy (P3 §M, Nov 11)** — real rows, PayPal invoices, own statement links. Emails = `SANDBOX_BUYER_EMAIL` plus-addressed (`<local>+harbor@<domain>`, `<local>+lakeside@<domain>`) because the importer keys buyers by email. `build_csv(D, email)` stays Northside-only (the agent eval's Facts are built from it); `build_demo_csv(D, email)` adds these two.
+
+Harbor Gems — owes **$2,300**, oldest 12 d, nothing past due · 1 out, 2 kept, 2 returned
+| Memo | Sent | Line | Description | Price | Status |
+|---|---|---|---|---|---|
+| M-215 | D-30 | S-130 | Marquise 0.80ct | $1,450 | KEPT → INV-1055 |
+| M-215 | | S-131 | Sapphire ring | $1,200 | RETURNED D-14, R-330 |
+| M-215 | | S-132 | Gold chain | $400 | OUT, due back D+20 |
+| M-219 | D-10 | S-135 | Drop earrings | $850 | KEPT → INV-1058 |
+| M-219 | | S-136 | Opal pendant | $600 | RETURNED D-3, R-337 |
+
+Lakeside Fine Jewelry — owes **$5,960**, oldest 31 d, **$3,500 past due** · 1 out, 4 kept, 1 returned
+| Memo | Sent | Line | Description | Price | Status |
+|---|---|---|---|---|---|
+| M-205 | D-60 | S-140 | Princess 1.10ct | $2,600 | KEPT → INV-1040 |
+| M-205 | | S-141 | Pearl strand | $900 | KEPT → INV-1040 |
+| M-205 | | S-142 | Ruby studs | $1,100 | RETURNED D-35, R-314 |
+| M-216 | D-25 | S-150 | Eternity band | $1,700 | KEPT → INV-1056 |
+| M-216 | | S-151 | Locket | $760 | KEPT → INV-1056 |
+| M-216 | | S-152 | Aquamarine | $1,250 | OUT, due back D+15 |
+
+| Invoice | Buyer | Memo | Lines | Total | Issued | Due |
+|---|---|---|---|---|---|---|
+| INV-1055 | Harbor | M-215 | S-130 | $1,450 | D-12 | D+18 |
+| INV-1058 | Harbor | M-219 | S-135 | $850 | D-4 | D+26 |
+| INV-1040 | Lakeside | M-205 | S-140, S-141 | $3,500 | D-31 | D-1 (overdue) |
+| INV-1056 | Lakeside | M-216 | S-150, S-151 | $2,460 | D-8 | D+22 |
+
+No seeded message or proposal for these two (the $20 request stays on Northside). Memo, SKU and invoice numbers are unique across the whole copy. Copy totals: owed $16,680, past due $7,000.
+
 Demo copies: `paypal_invoice_number` = `INV-1038-<6 random chars>`; memo/invoice numbers shown to people stay `M-201` / `INV-1038`.

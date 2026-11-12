@@ -10,7 +10,9 @@ from backend.services import demo
 
 
 def demo_copy(settings: Settings, demo_session: str, today: date) -> tuple[int, str]:
-    bid, token, _facts, _allowed = demo._create_copy(SessionLocal, settings, demo_session, today)
+    bid, token, _ids, _facts, _allowed = demo._create_copy(
+        SessionLocal, settings, demo_session, today
+    )
     demo._finish(SessionLocal, bid, "test-ip", datetime.now(UTC),
                  TriageOutcome(None, {}, None, "not_run"))  # fmt: skip
     return bid, token

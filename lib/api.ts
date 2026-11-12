@@ -102,7 +102,16 @@ export interface Statement {
   pending_proposals: number;
   requests: BuyerRequest[];
   demo_login: { email: string; password: string } | null;
+  paypal_setup: PaypalSetupState; // P3 §M M9: not READY → can't be paid yet
 }
+
+/** Whether a buyer's invoices are on PayPal yet (P3 §M M9). */
+export type PaypalSetupState = "READY" | "SETTING_UP" | "FAILED";
+export type SetupResult = { paypal_setup: PaypalSetupState };
+export type WhoAmI = {
+  statement_token: string | null; // the copy's Northside (landing / back link)
+  buyers: { id: number; name: string; statement_token: string }[]; // all three (P3 §M M4)
+};
 
 export interface Preview {
   allocations: { invoice_id: number; invoice_no: string; amount_cents: number }[];
@@ -191,6 +200,7 @@ export interface SupplierOverview {
     last_payment: { amount_cents: number; received_at: string | null } | null;
     pending_proposals: number;
     promise: string | null;
+    paypal_setup: PaypalSetupState;
   }[];
   pending: ProposalCard[];
   recent_payments: {
@@ -221,6 +231,7 @@ export interface BuyerDetail {
   past_due_cents: number;
   oldest_age_days: number;
   credit_cents: number;
+  paypal_setup: PaypalSetupState;
   memos: Memo[];
   invoices: SupplierInvoice[];
   messages: { id: number; kind: string; text: string; label: string | null; created_at: string }[];
@@ -351,7 +362,8 @@ export const api = {
     call<AskResult>(`/statement/${enc(token)}/ask`, post({ question })),
   message: (token: string, text: string) =>
     call<MessageResult>(`/statement/${enc(token)}/message`, post({ text })),
-  whoami: () => call<{ statement_token: string | null }>("/demo/whoami"),
+  setup: (token: string) => call<SetupResult>(`/statement/${enc(token)}/setup`, post({})),
+  whoami: () => call<WhoAmI>("/demo/whoami"),
   supplier: {
     overview: () => call<SupplierOverview>("/supplier/overview"),
     buyer: (id: number) => call<BuyerDetail>(`/supplier/buyers/${id}`),
@@ -359,5 +371,6 @@ export const api = {
     decide: (id: number, body: DecideBody) =>
       call<ProposalCard>(`/supplier/proposals/${id}/decide`, post(body)),
     record: (body: RecordBody) => call<RecordResult>("/supplier/payments/record", post(body)),
+    setup: (id: number) => call<SetupResult>(`/supplier/buyers/${id}/setup`, post({})),
   },
 };

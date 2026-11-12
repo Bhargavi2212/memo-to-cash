@@ -12,6 +12,7 @@ import { paymentMethodLabel, paypalStatusLabel } from "@/lib/labels";
 import { formatCents } from "@/lib/money";
 
 import { MemoGroup } from "../MemoGroup";
+import { PaypalSetup } from "../PaypalSetup";
 import { StatusChip } from "../StatusChip";
 import { DecidedLine, ProposalCard } from "./ProposalCard";
 import { RecordPaymentModal } from "./RecordPaymentModal";
@@ -40,7 +41,7 @@ export function BuyerDetail() {
 
   return (
     <div className="min-w-0 space-y-6 break-words">
-      {demo && <SupplierBanner />}
+      {demo && <SupplierBanner token={d.statement_token} />}
       <p className="text-sm">
         <Link href="/supplier" className="text-accent underline">
           ← All buyers
@@ -73,12 +74,20 @@ export function BuyerDetail() {
           <button
             type="button"
             onClick={() => setRecording(true)}
-            className="min-h-11 rounded-card bg-accent px-4 font-medium text-white"
+            disabled={d.paypal_setup !== "READY"}
+            className="min-h-11 rounded-card bg-accent px-4 font-medium text-white disabled:opacity-50"
           >
             Record payment
           </button>
         </div>
       </header>
+      {d.paypal_setup !== "READY" && (
+        <PaypalSetup
+          run={() => api.supplier.setup(d.buyer.id)}
+          onReady={refresh}
+          action="Record payment"
+        />
+      )}
 
       {open.length > 0 && (
         <section aria-labelledby="open-h" className="space-y-3">
