@@ -193,6 +193,7 @@ class PayPal:
         path: str,
         *,
         json: Any = None,
+        content: bytes | None = None,
         request_id: str | None = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
@@ -201,7 +202,8 @@ class PayPal:
         """Call PayPal and return the JSON body ({} when empty). Raises PayPalError.
 
         `timeout` (seconds, whole call) and `retries` override the defaults — capture uses
-        10 s and no retries because it runs under the buyer lock (P2 D10, R7)."""
+        10 s and no retries because it runs under the buyer lock (P2 D10, R7). `content` sends
+        exact bytes instead of `json` (webhook verification splices the raw event, P3b R9)."""
         method = method.upper()
         call_timeout = timeout if timeout is not None else TIMEOUT_S
         max_retries = len(BACKOFF_S) if retries is None else min(retries, len(BACKOFF_S))
@@ -219,7 +221,12 @@ class PayPal:
                 start = _now()
                 try:
                     resp = await http.request(
-                        method, path, json=json, headers=hdrs, timeout=httpx.Timeout(call_timeout)
+                        method,
+                        path,
+                        json=None if content is not None else json,
+                        content=content,
+                        headers=hdrs,
+                        timeout=httpx.Timeout(call_timeout),
                     )
                 except httpx.TimeoutException:
                     log.warning("paypal %s %s -> timeout after %.0f s", method, path, call_timeout)
