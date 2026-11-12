@@ -31,6 +31,7 @@ from backend.db.models import (
     Proposal,
 )
 from backend.services.credit import credit_from
+from backend.services.mirror import setup_state
 
 log = logging.getLogger("statement")
 
@@ -178,6 +179,7 @@ class Statement(BaseModel):
     pending_proposals: int
     requests: list["RequestOut"] = []  # P4 D17
     demo_login: DemoLogin | None = None
+    paypal_setup: str = "READY"  # READY | SETTING_UP | FAILED (P3 §M M9)
 
 
 class PreviewAllocation(BaseModel):
@@ -363,6 +365,7 @@ def get_statement(session: Session, token: str, today: date, settings: Settings)
             for m in memos
         ],
         invoices=inv_out,
+        paypal_setup=setup_state([(i.ledger_status, i.mirror_error) for i in invoices]),
         payments=pay_out,
         credit_cents=credit_from(payments, (p for p, _at in proposal_rows)),  # one rule (G5)
         notices=notices,

@@ -29,7 +29,7 @@ from backend.db.models import Buyer, DemoRate, Invoice, Memo, MemoLine, Message,
 from backend.paypal.client import PayPal, PayPalNotConfiguredError
 from backend.services import audit
 from backend.services.importer import import_csv
-from backend.services.mirror import MirrorResult, mirror_invoices
+from backend.services.mirror import mirror_invoices
 
 COLUMNS = (
     "record_type",
@@ -282,6 +282,7 @@ class DemoStart:
     ms: int
     cookie: str
     demo_session: str
+    others: list[int]  # Harbor + Lakeside: mirrored after the response (P3 §M M2)
 
 
 def missing_settings(settings: Settings) -> list[str]:
@@ -452,7 +453,8 @@ def _finish(
         audit.log(s, actor, action, ref="INV-1051", detail={"buyer_id": buyer_id,
                   "proposal_id": prop.id, "triage": tri.action.code if tri.action else
                   tri.fallback_reason})  # fmt: skip
-        # the whole copy becomes reachable together, only after every buyer mirrored (M5, G14)
+        # the copy becomes reachable once Northside is on PayPal; the others show "Setting up on
+        # PayPal…" until their background setup finishes (M5, M9)
         for b in s.scalars(select(Buyer).where(Buyer.demo_session == buyer.demo_session)):
             b.demo_ready = True
         _bump(s, ip_key, bucket)
@@ -506,7 +508,7 @@ async def start_demo(
     triage_task = asyncio.create_task(_triage(facts, allowed, client))
     try:
         result = await asyncio.wait_for(
-            _mirror_copy(buyer_ids, pp, settings, session_factory, today_ny(when)),
+            mirror_invoices(buyer_id, pp, settings, session_factory, today=today_ny(when)),
             timeout=DEADLINE_S,
         )
     except TimeoutError as e:
@@ -540,26 +542,8 @@ async def start_demo(
         ms=int((time.perf_counter() - started) * 1000),
         cookie=make_demo_cookie(demo_session, settings),
         demo_session=demo_session,
+        others=[b for b in buyer_ids if b != buyer_id],
     )
-
-
-async def _mirror_copy(
-    buyer_ids: list[int],
-    pp: PayPal,
-    settings: Settings,
-    session_factory: Callable[[], Session],
-    today: date,
-) -> MirrorResult:
-    """All of a copy's buyers mirrored in parallel by the same `mirror_invoices` (P3 §M, M2);
-    one merged result, so any buyer failing fails the start."""
-    results = await asyncio.gather(
-        *(mirror_invoices(b, pp, settings, session_factory, today=today) for b in buyer_ids)
-    )
-    merged = MirrorResult()
-    for r in results:
-        merged.mirrored += r.mirrored
-        merged.errors += r.errors
-    return merged
 
 
 async def _drop(task: "asyncio.Task[Any]") -> None:

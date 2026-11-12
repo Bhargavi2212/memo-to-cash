@@ -20,7 +20,7 @@ from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import demo, payments, proposals
+from backend.services import demo, mirror, payments, proposals
 from backend.services import supplier as svc
 
 router = APIRouter(prefix="/api/supplier")
@@ -189,3 +189,28 @@ async def record_payment(
     with session_factory() as s:
         out = svc.payment_summary(s, pid)
     return out | {"repeat": repeat}
+
+
+def _setup_target(
+    request: Request, session_factory: Callable[[], Session], settings: Settings, buyer_id: int
+) -> int:
+    with session_factory() as s:
+        return svc.buyer_in_scope(s, _scope(request, s, settings), buyer_id).id
+
+
+@router.post("/buyers/{buyer_id}/setup")
+async def buyer_setup(
+    buyer_id: int,
+    request: Request,
+    pp: Annotated[PayPal, Depends(get_paypal)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+) -> Any:
+    """P3 §M M9, supplier side: same as `/statement/{token}/setup` for a buyer in scope."""
+    try:
+        bid = await run_in_threadpool(_setup_target, request, session_factory, settings, buyer_id)
+    except svc.ScopeError as e:
+        return _error(e.status, e.code, e.message)
+    except svc.NotFoundError:
+        return _error(404, *NOT_FOUND)
+    return {"paypal_setup": await mirror.ensure_setup(bid, pp, settings, session_factory)}

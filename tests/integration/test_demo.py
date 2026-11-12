@@ -402,8 +402,9 @@ def test_start_makes_three_ready_buyers_all_on_paypal(client, db, fake):
     assert [m.buyer_id for m in db.scalars(select(Message))] == [north.id]
 
 
-def test_one_buyer_failing_on_paypal_fails_the_whole_start(client, db, fake):
-    fake.fail("create", error(400, "VALIDATION_ERROR"))  # one of the 7 creates is refused
+def test_northside_failing_on_paypal_fails_the_start(client, db, fake):
+    """Option 2 (M2): the start gates on Northside only — mirrored first, inside the request."""
+    fake.fail("create", error(400, "VALIDATION_ERROR"))  # Northside's first create is refused
     r = start(client)
     assert r.status_code == 502
     assert_nothing_reachable(r, db)
@@ -416,6 +417,7 @@ def test_a_retried_start_gives_exactly_three_ready_buyers(client, db, fake):
     fake.fail("send", *[error(503)] * 20)
     failed = start(client)
     assert failed.status_code == 503
+    fake.faults.clear()  # PayPal is healthy again for the retry
     old_ids = list(db.scalars(select(Buyer.id)))
     ok = start(client, "5.6.7.8")
     assert ok.status_code == 200, ok.text
@@ -428,14 +430,15 @@ def test_a_retried_start_gives_exactly_three_ready_buyers(client, db, fake):
 
 
 def test_resuming_a_copys_mirror_creates_no_duplicate_invoices(client, db, fake, settings):
-    """G9 (b): every send failed after the creates → the resume adopts the 7 PayPal invoices
-    (search by our number), per buyer; PayPal ends with exactly 7 invoices."""
+    """G9 (b): Northside's sends failed after its creates (start 503, nobody reachable) → the
+    resume adopts Northside's 3 PayPal invoices and creates the other 4 once; PayPal ends with
+    exactly 7 invoices."""
     from backend.db.session import SessionLocal
     from backend.services.mirror import mirror_invoices
 
     fake.fail("send", *[error(503)] * 20)
     assert start(client).status_code == 503
-    assert len(fake.invoices) == 7
+    assert len(fake.invoices) == 3  # Northside only: the others go after a successful start
     fake.faults.clear()
     pp = PayPal(settings, transport=fake.transport())
     for b in db.scalars(select(Buyer)).all():

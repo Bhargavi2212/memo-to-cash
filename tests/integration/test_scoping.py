@@ -41,6 +41,10 @@ def buyer(db, session, ready=True):
     res = import_csv(db, build_csv(D, "buyer@example.com"), demo_session=session)
     b = db.get(Buyer, res.buyer_ids[0])
     b.demo_ready = ready
+    for i in db.scalars(select(Invoice).where(Invoice.buyer_id == b.id)):
+        i.ledger_status = (
+            "OPEN"  # on PayPal, as the mirror leaves it (phase M: DRAFT can't be paid)
+        )
     db.commit()
     return b
 

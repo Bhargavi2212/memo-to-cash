@@ -230,6 +230,7 @@ def overview(session: Session, scope: Scope, today: date, settings: Settings) ->
             "owed_cents": s.owed_cents,
             "oldest_age_days": s.oldest_age_days,
             "past_due_cents": s.past_due_cents,
+            "paypal_setup": s.paypal_setup,
             "credit_cents": s.credit_cents,
             "last_payment": (
                 {"amount_cents": last.amount_cents, "received_at": last.received_at}
@@ -351,6 +352,7 @@ def buyer_detail(
         "past_due_cents": s.past_due_cents,
         "oldest_age_days": s.oldest_age_days,
         "credit_cents": s.credit_cents,
+        "paypal_setup": s.paypal_setup,
         "memos": [m.model_dump() for m in s.memos],
         "invoices": invoices,
         "messages": messages,
