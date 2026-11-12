@@ -41,6 +41,7 @@ memo-to-cash/
 ├── scripts/                        __init__.py (P0)
 │   ├── sandbox/                    ✅ statement_test.ps1 · statement_test_v2.ps1 (manual PayPal experiments) · __init__.py + p1_open_checks.py (P1, `python -m scripts.sandbox.p1_open_checks`) · p2_smoke.py (P2, order → approve in browser → capture → record)
 │   ├── llm_smoke.py                P0 LLM key + model check (prints ok/model/ms only)
+│   ├── demo_timing.py              Phase M: N demo starts against an api, p50/p95 ms (no tokens)
 │   └── sandbox_smoke.py            P5 end-to-end run against the real sandbox
 │
 ├── package.json · next.config.ts · tsconfig.json · eslint.config.mjs · AGENTS.md   P0 (Next 16.4; Tailwind v4 via Turbopack CSS loader, tokens in app/globals.css; next-env.d.ts generated, git-ignored)

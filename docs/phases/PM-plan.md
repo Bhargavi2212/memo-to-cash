@@ -60,3 +60,13 @@ Read for this plan: `services/demo.py` (seed, start, finish), `services/mirror.p
 | m6–m7 PR, Render timing, docs | 15 min + your merge |
 | **Total** | **~2 h 15 min** |
 P3b stays next (`P3b.md`: last merge by Thu 13:30 ET).
+
+## 6. Build log
+- **B1 m1** `feat(pm): three-buyer demo seed (M1)` — `build_demo_csv`; `build_csv` byte-identical (golden sha). Importer + unit tests green.
+- **B2 m2** `feat(pm): demo start mirrors all three buyers in parallel (M2, M5)` — `_mirror_copy` = `gather` of `mirror_invoices` per buyer, merged result; whole copy ready in `_finish`; whoami → Northside by name (G3, pulled forward from m3 to keep the suite green). Full suite green (548 + 27 demo).
+- **B3 local timing gate — STOPPED (p95 > 6 s).** Same machine, same dev DB, real sandbox, 5 runs each, server `ms`:
+  | Code | runs (ms) | p50 | p95 (= max at n=5) |
+  |---|---|---|---|
+  | M (7 invoices, 3 buyers in parallel) | 5,301 · 4,560 · 4,765 · 8,276 · 9,826 | 5,301 | 9,826 |
+  | `main` (3 invoices, baseline) | 6,383 · 5,599 · 5,918 · 5,382 · 5,645 | 5,645 | 6,383 |
+  No 429s. Per-call breakdown: in M runs 1–3 the slowest create/send were ≤ 1.5 s / ≤ 2.1 s; in runs 4–5 single PayPal calls took up to 4.0 s (create) / 4.1 s (send) — the sandbox spread 7 parallel creates out like a queue. Run 1 fetched the OAuth token 7 times at once (cold-cache stampede, ~1.1 s). The one-buyer baseline is itself over 6 s locally (Render did 2.2–3.4 s in P4 step 9): locally the parallel model triage (Neon + Meta API from this machine) sets the floor. Waiting for Bhargavi before any design change.
