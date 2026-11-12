@@ -350,3 +350,55 @@ def test_all_errors_returned_at_once(db):
 def test_header_missing_column(db):
     res = import_csv(db, "record_type,buyer_name\nBUYER,X\n")
     assert res.errors[0]["row"] == 1 and "missing columns" in res.errors[0]["msg"]
+
+
+# --- Phase M (P3 §M, M1): three buyers per demo copy ---------------------------------------
+
+# sha256 of build_csv(date(2026, 1, 15), EMAIL) before phase M: the agent eval's Facts are built
+# from build_csv, so it must stay Northside-only and byte-identical (PM-plan G2). Fixed input
+# date on purpose — this is a fingerprint, not demo data.
+NORTHSIDE_CSV_SHA = "c3adffe4790e105a6d98f1439ac7e05bf4962ffd3076d51f805c5aab7a51f392"
+
+
+def test_build_csv_is_unchanged_northside_only():
+    import hashlib
+    from datetime import date
+
+    text = build_csv(date(2026, 1, 15), EMAIL)
+    assert hashlib.sha256(text.encode()).hexdigest() == NORTHSIDE_CSV_SHA
+
+
+def test_demo_csv_has_three_real_buyers(db):
+    from backend.services.demo import build_demo_csv
+
+    res = import_csv(db, build_demo_csv(D, "judge@example.com"))
+    assert res.ok, res.errors
+    assert res.created == {"buyers": 3, "memos": 7, "lines": 23, "invoices": 7}
+    buyers = {b.name: b for b in db.scalars(select(Buyer))}
+    assert {n: b.email for n, b in buyers.items()} == {
+        "Northside Jewelers": "judge@example.com",
+        "Harbor Gems": "judge+harbor@example.com",
+        "Lakeside Fine Jewelry": "judge+lakeside@example.com",
+    }
+    assert len({b.statement_token for b in buyers.values()}) == 3
+
+    def summary(b):
+        invs = list(db.scalars(select(Invoice).where(Invoice.buyer_id == b.id)))
+        lines = list(db.scalars(select(MemoLine).join(Memo).where(Memo.buyer_id == b.id)))
+        st = [ln.status for ln in lines]
+        return (
+            sum(i.total_cents for i in invs),
+            max((D - i.issued_on).days for i in invs),
+            sum(i.total_cents for i in invs if i.due_on < D),
+            (st.count("OUT"), st.count("KEPT"), st.count("RETURNED")),
+        )
+
+    assert summary(buyers["Northside Jewelers"]) == (842000, 48, 350000, (2, 5, 5))
+    assert summary(buyers["Harbor Gems"]) == (230000, 12, 0, (1, 2, 2))
+    assert summary(buyers["Lakeside Fine Jewelry"]) == (596000, 31, 350000, (1, 4, 1))
+    harbor = {i.erp_invoice_no: i.total_cents for i in db.scalars(
+        select(Invoice).where(Invoice.buyer_id == buyers["Harbor Gems"].id))}  # fmt: skip
+    assert harbor == {"INV-1055": 145000, "INV-1058": 85000}
+    # memo, SKU and invoice numbers are unique across the copy
+    assert db.scalar(select(func.count(func.distinct(Invoice.erp_invoice_no)))) == 7
+    assert db.scalar(select(func.count(func.distinct(MemoLine.sku)))) == 23
