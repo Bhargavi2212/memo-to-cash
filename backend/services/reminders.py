@@ -157,7 +157,8 @@ def _save(
             evidence={
                 "source": "agent",
                 "checks": [
-                    f"{prep['invoice_no']} is {prep['days']} days past due",
+                    f"{prep['invoice_no']} is {prep['days']} day{'' if prep['days'] == 1 else 's'} "
+                    "past due",
                     f"{usd(prep['due_cents'])} due",
                     "every amount and day count is from the records",
                 ],

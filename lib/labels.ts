@@ -25,8 +25,10 @@ const METHOD: Record<string, string> = {
   PAYPAL: "PayPal",
 };
 
-/** How a payment came in: PayPal (statement / PayPal page) or the recorded method. */
+/** How a payment came in: our Pay button (PayPal), PayPal's own invoice page (taken in by the
+ * webhook / pay check / sweep — P3b G15), or the method the supplier recorded. */
 export function paymentMethodLabel(source: string, method: string | null): string {
+  if (source === "PAYPAL_INVOICE_PAGE") return "Paid on PayPal's invoice page";
   if (source !== "OFF_PAYPAL") return "PayPal";
   return METHOD[method ?? ""] ?? "Other";
 }
