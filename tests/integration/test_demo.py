@@ -21,6 +21,7 @@ from backend.db.models import (
     DemoRate,
     Invoice,
     LlmUsage,
+    Memo,
     MemoLine,
     Message,
     Proposal,
@@ -125,7 +126,9 @@ def test_start_creates_a_ready_private_copy(client, db, settings):
     assert days_overdue(invs["INV-1038"].due_on, today_ny()) == 18
     assert all(i.ledger_status == "OPEN" and i.paypal_invoice_id for i in invs.values())
 
-    statuses = list(db.scalars(select(MemoLine.status)))
+    statuses = list(
+        db.scalars(select(MemoLine.status).join(Memo).where(Memo.buyer_id == buyer.id))
+    )  # Northside's own lines (phase M adds two buyers to the copy)
     assert (statuses.count("KEPT"), statuses.count("RETURNED"), statuses.count("OUT")) == (5, 5, 2)
 
     # P4 D13 (A3): the seed message went through the real triage → the agent's proposal
@@ -365,3 +368,77 @@ def test_triage_runs_alongside_the_mirror(db, fake, settings):
     with_triage = run(0.6)
     assert mirror_only >= 800, mirror_only  # by construction: the mirror covers the triage
     assert with_triage < mirror_only + 300, (mirror_only, with_triage)  # sequential: + 600
+
+
+# ---------- phase M: three real buyers per copy (P3 §M, M2, M5, M7; PM-plan G9) ----------
+
+NAMES = {"Northside Jewelers", "Harbor Gems", "Lakeside Fine Jewelry"}
+
+
+def copy_buyers(db, session):
+    return {b.name: b for b in db.scalars(select(Buyer).where(Buyer.demo_session == session))}
+
+
+def test_start_makes_three_ready_buyers_all_on_paypal(client, db, fake):
+    r = start(client)
+    assert r.status_code == 200, r.text
+    north = db.get(Buyer, r.json()["buyer_id"])
+    assert north.name == "Northside Jewelers"  # the redirect still opens Northside
+    buyers = copy_buyers(db, north.demo_session)
+    assert set(buyers) == NAMES and all(b.is_demo and b.demo_ready for b in buyers.values())
+    assert buyers["Harbor Gems"].email == "sb-buyer+harbor@personal.example.com"  # G1
+    assert buyers["Lakeside Fine Jewelry"].email == "sb-buyer+lakeside@personal.example.com"
+    invs = list(db.scalars(select(Invoice)))
+    assert len(invs) == 7
+    assert all(i.paypal_invoice_id and i.payer_view_url and i.ledger_status == "OPEN"
+               for i in invs)  # fmt: skip
+    assert fake.ops().count("create") == 7 and fake.ops().count("send") == 7
+    owed = {b.name: sum(i.total_cents for i in invs if i.buyer_id == b.id)
+            for b in buyers.values()}  # fmt: skip
+    assert owed == {"Northside Jewelers": 842000, "Harbor Gems": 230000,
+                    "Lakeside Fine Jewelry": 596000}  # fmt: skip
+    # the seeded $20 request (and its message) stays on Northside only (M6)
+    assert [p.buyer_id for p in db.scalars(select(Proposal))] == [north.id]
+    assert [m.buyer_id for m in db.scalars(select(Message))] == [north.id]
+
+
+def test_one_buyer_failing_on_paypal_fails_the_whole_start(client, db, fake):
+    fake.fail("create", error(400, "VALIDATION_ERROR"))  # one of the 7 creates is refused
+    r = start(client)
+    assert r.status_code == 502
+    assert_nothing_reachable(r, db)
+    assert db.scalar(select(func.count()).select_from(Buyer)) == 3  # rows exist, none ready
+
+
+def test_a_retried_start_gives_exactly_three_ready_buyers(client, db, fake):
+    """G9 (a): a start that fails part-way leaves none of its buyers reachable; the retry is a
+    fresh copy with exactly three ready buyers, and the failed copy's buyers stay 404."""
+    fake.fail("send", *[error(503)] * 20)
+    failed = start(client)
+    assert failed.status_code == 503
+    old_ids = list(db.scalars(select(Buyer.id)))
+    ok = start(client, "5.6.7.8")
+    assert ok.status_code == 200, ok.text
+    db.expire_all()
+    ready = list(db.scalars(select(Buyer).where(Buyer.demo_ready.is_(True))))
+    assert {b.name for b in ready} == NAMES and len(ready) == 3
+    assert not set(old_ids) & {b.id for b in ready}
+    for old in old_ids:
+        assert client.get(f"/api/supplier/buyers/{old}").status_code == 404
+
+
+def test_resuming_a_copys_mirror_creates_no_duplicate_invoices(client, db, fake, settings):
+    """G9 (b): every send failed after the creates → the resume adopts the 7 PayPal invoices
+    (search by our number), per buyer; PayPal ends with exactly 7 invoices."""
+    from backend.db.session import SessionLocal
+    from backend.services.mirror import mirror_invoices
+
+    fake.fail("send", *[error(503)] * 20)
+    assert start(client).status_code == 503
+    assert len(fake.invoices) == 7
+    fake.faults.clear()
+    pp = PayPal(settings, transport=fake.transport())
+    for b in db.scalars(select(Buyer)).all():
+        res = asyncio.run(mirror_invoices(b.id, pp, settings, SessionLocal))
+        assert res.ok, res.errors
+    assert len(fake.invoices) == 7 and fake.ops().count("create") == 7

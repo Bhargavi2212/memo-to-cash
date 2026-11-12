@@ -360,16 +360,19 @@ def buyer_detail(
 
 
 def whoami(session: Session, settings: Settings, cookie: str | None) -> str | None:
-    """The statement token of the cookie's own ready copy (A10, R10), else None."""
+    """The statement token of the cookie's own ready copy (A10, R10) — its Northside buyer, the
+    landing / back-link target (P3 §M, PM-plan G3) — else None."""
     if not settings.demo_mode:
         return None
     sess = demo.read_demo_cookie(cookie, settings)
     if not sess:
         return None
     return session.scalars(
-        select(Buyer.statement_token)
-        .where(Buyer.demo_session == sess, Buyer.demo_ready.is_(True))
-        .order_by(Buyer.id.desc())
+        select(Buyer.statement_token).where(
+            Buyer.demo_session == sess,
+            Buyer.demo_ready.is_(True),
+            Buyer.name == demo.BUYER_NAME,
+        )
     ).first()
 
 

@@ -68,10 +68,13 @@ def test_overview_shows_the_visitors_own_copy(clients, db):
     r = a.get("/api/supplier/overview")
     assert r.status_code == 200, r.text
     o = r.json()
-    assert o["totals"] == {"open_cents": 842000, "past_due_cents": 350000,
+    # phase M: the copy has three real buyers (Northside $8,420 + Lakeside $5,960 + Harbor $2,300)
+    assert o["totals"] == {"open_cents": 1668000, "past_due_cents": 700000,
                            "paid_this_week_cents": 0}  # fmt: skip
-    (row,) = o["buyers"]
-    assert row["id"] == mine["buyer_id"] and row["name"] == "Northside Jewelers"
+    assert {b["name"] for b in o["buyers"]} == {
+        "Northside Jewelers", "Lakeside Fine Jewelry", "Harbor Gems"}  # fmt: skip
+    (row,) = [b for b in o["buyers"] if b["id"] == mine["buyer_id"]]
+    assert row["name"] == "Northside Jewelers"
     assert (row["out"], row["kept"], row["returned"]) == (2, 5, 5)
     assert row["owed_cents"] == 842000 and row["pending_proposals"] == 1
     (card,) = o["pending"]
@@ -98,7 +101,7 @@ def test_overview_counts_a_payment_this_week_and_its_split(clients, db):
         by_id[inv_id].paid_cents += cents
     db.commit()
     o = a.get("/api/supplier/overview").json()
-    assert o["totals"]["paid_this_week_cents"] == 500000 and o["totals"]["open_cents"] == 342000
+    assert o["totals"]["paid_this_week_cents"] == 500000 and o["totals"]["open_cents"] == 1168000
     (p,) = o["recent_payments"]
     assert p["split"] == [{"invoice_no": "INV-1038", "amount_cents": 350000},
                           {"invoice_no": "INV-1042", "amount_cents": 150000}]  # fmt: skip
@@ -137,8 +140,10 @@ def test_a_demo_cookie_never_reaches_another_copy(clients, db):
     assert a.get(f"/api/supplier/buyers/{theirs['buyer_id']}").status_code == 404
     r = a.post(f"/api/supplier/proposals/{their_prop}/decide", json={"decision": "REJECT"})
     assert r.status_code == 404
-    assert [x["id"] for x in a.get("/api/supplier/overview").json()["buyers"]] == [
-        mine["buyer_id"]]  # fmt: skip
+    my_copy = set(db.scalars(select(Buyer.id).where(
+        Buyer.demo_session == db.get(Buyer, mine["buyer_id"]).demo_session)))  # fmt: skip
+    assert len(my_copy) == 3
+    assert {x["id"] for x in a.get("/api/supplier/overview").json()["buyers"]} == my_copy
     assert {p["buyer"]["id"] for p in a.get("/api/supplier/proposals").json()} == {
         mine["buyer_id"]}  # fmt: skip
     db.expire_all()
@@ -171,7 +176,9 @@ def test_no_auth_and_unknown_ids(clients, db):
 def test_a_half_built_copy_is_invisible(clients, db):
     a, _ = clients
     mine = start(a, "5.5.5.1")
-    db.get(Buyer, mine["buyer_id"]).demo_ready = False
+    session = db.get(Buyer, mine["buyer_id"]).demo_session
+    for b in db.scalars(select(Buyer).where(Buyer.demo_session == session)):
+        b.demo_ready = False  # a copy is ready all together (phase M, G14)
     db.commit()
     assert a.get(f"/api/supplier/buyers/{mine['buyer_id']}").status_code == 404
     assert a.get("/api/supplier/overview").json()["buyers"] == []

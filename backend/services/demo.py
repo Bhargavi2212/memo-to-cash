@@ -29,7 +29,7 @@ from backend.db.models import Buyer, DemoRate, Invoice, Memo, MemoLine, Message,
 from backend.paypal.client import PayPal, PayPalNotConfiguredError
 from backend.services import audit
 from backend.services.importer import import_csv
-from backend.services.mirror import mirror_invoices
+from backend.services.mirror import MirrorResult, mirror_invoices
 
 COLUMNS = (
     "record_type",
@@ -364,25 +364,28 @@ def check_rate(session_factory: Callable[[], Session], ip_key: str, now: datetim
 
 def _create_copy(
     session_factory: Callable[[], Session], settings: Settings, demo_session: str, today: date
-) -> tuple[int, str, Any, bool]:
-    """Importer → the seed *message only*, one transaction (P4 D13). Returns (buyer id, token,
-    the buyer's Facts for the triage, whether the global LLM cap allows a call)."""
+) -> tuple[int, str, list[int], Any, bool]:
+    """Importer (three buyers, P3 §M) → the seed *message only* on Northside, one transaction
+    (P4 D13). Returns (Northside's id, its token, every buyer id in the copy, Northside's Facts
+    for the triage, whether the global LLM cap allows a call)."""
     from backend.agent import caps
     from backend.agent.facts import facts_for_buyer
 
     assert settings.sandbox_buyer_email
     with session_factory() as s, s.begin():
         res = import_csv(
-            s, build_csv(today, settings.sandbox_buyer_email), demo_session=demo_session
+            s, build_demo_csv(today, settings.sandbox_buyer_email), demo_session=demo_session
         )
         if not res.ok:  # the seed is ours: this is a bug, not a user error
             raise RuntimeError(f"seed import failed: {res.errors}")
-        buyer = s.get(Buyer, res.buyer_ids[0])
-        assert buyer is not None
+        buyer = s.scalars(
+            select(Buyer).where(Buyer.id.in_(res.buyer_ids), Buyer.name == BUYER_NAME)
+        ).one()
         s.add(Message(buyer_id=buyer.id, text=SEED_MESSAGE, kind="MESSAGE",
                       ai_result={"seeded": True}))  # fmt: skip
         allowed = caps.take_unit(s, today, None)  # demo start counts toward global only (D9)
-        return buyer.id, buyer.statement_token, facts_for_buyer(s, buyer.id, today), allowed
+        facts = facts_for_buyer(s, buyer.id, today)
+        return buyer.id, buyer.statement_token, list(res.buyer_ids), facts, allowed
 
 
 def _seed_proposal(s: Session, buyer_id: int, msg: Message) -> Proposal:
@@ -449,7 +452,9 @@ def _finish(
         audit.log(s, actor, action, ref="INV-1051", detail={"buyer_id": buyer_id,
                   "proposal_id": prop.id, "triage": tri.action.code if tri.action else
                   tri.fallback_reason})  # fmt: skip
-        buyer.demo_ready = True
+        # the whole copy becomes reachable together, only after every buyer mirrored (M5, G14)
+        for b in s.scalars(select(Buyer).where(Buyer.demo_session == buyer.demo_session)):
+            b.demo_ready = True
         _bump(s, ip_key, bucket)
         total = _bump(s, "global", bucket)
         audit.log(
@@ -494,14 +499,14 @@ async def start_demo(
     await run_in_threadpool(check_rate, session_factory, ip_key, when)
 
     demo_session = secrets.token_urlsafe(16)
-    buyer_id, token, facts, allowed = await run_in_threadpool(
+    buyer_id, token, buyer_ids, facts, allowed = await run_in_threadpool(
         _create_copy, session_factory, settings, demo_session, today_ny(when)
     )
     # D13: the seed message goes through the real triage while PayPal mirrors the invoices
     triage_task = asyncio.create_task(_triage(facts, allowed, client))
     try:
         result = await asyncio.wait_for(
-            mirror_invoices(buyer_id, pp, settings, session_factory, today=today_ny(when)),
+            _mirror_copy(buyer_ids, pp, settings, session_factory, today_ny(when)),
             timeout=DEADLINE_S,
         )
     except TimeoutError as e:
@@ -536,6 +541,25 @@ async def start_demo(
         cookie=make_demo_cookie(demo_session, settings),
         demo_session=demo_session,
     )
+
+
+async def _mirror_copy(
+    buyer_ids: list[int],
+    pp: PayPal,
+    settings: Settings,
+    session_factory: Callable[[], Session],
+    today: date,
+) -> MirrorResult:
+    """All of a copy's buyers mirrored in parallel by the same `mirror_invoices` (P3 §M, M2);
+    one merged result, so any buyer failing fails the start."""
+    results = await asyncio.gather(
+        *(mirror_invoices(b, pp, settings, session_factory, today=today) for b in buyer_ids)
+    )
+    merged = MirrorResult()
+    for r in results:
+        merged.mirrored += r.mirrored
+        merged.errors += r.errors
+    return merged
 
 
 async def _drop(task: "asyncio.Task[Any]") -> None:
