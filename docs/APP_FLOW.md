@@ -21,7 +21,7 @@ flowchart LR
 
 ## 1. Journey J1 — Judge (no login, < 3 min)
 1. Opens `/` → sees one line of pain + three buttons.
-2. "Start the demo" → `POST /demo/start` creates **their own** copy — three buyers, Northside Jewelers, Lakeside Fine Jewelry and Harbor Gems, each with fresh PayPal sandbox invoices made in parallel (P3 §M) → redirect to Northside's `/s/{token}`.
+2. "Start the demo" → `POST /demo/start` creates **their own** copy — three buyers, Northside Jewelers, Lakeside Fine Jewelry and Harbor Gems (P3 §M). Northside's PayPal invoices are made before the redirect to its `/s/{token}`; Harbor's and Lakeside's are made right after in the background ("Setting up on PayPal…" until done, a few seconds; opening them finishes or retries it — P3 §M M9).
 3. Expands memo M-201 → sees S-102 *Returned · R-311*, S-104 *Kept → INV-1038*, S-103 *Still with you*.
 4. Asks "Why is S-102 on my bill?" → agent: "S-102 isn't billed — your return R-311 was received <date>. S-103 is still with you, due back <date>." (dates relative to demo start)
 5. Sees $5,000 prefilled (demo mode) → split preview → PayPal popup (total; the split is on the order but PayPal's page shows only the total) → sandbox buyer (credentials shown on page) → receipt with split → "View on PayPal" shows the new due.
