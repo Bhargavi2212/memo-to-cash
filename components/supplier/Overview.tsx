@@ -4,7 +4,7 @@
 // A decided card stays in place with its result ("PayPal invoice INV-1051 updated: due
 // $1,400.00 · View on PayPal") — the judged moment. Tables become stacked cards below 640 px.
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, type ProposalCard as Card, type SupplierOverview } from "@/lib/api";
 import { longDate } from "@/lib/dates";
@@ -21,14 +21,17 @@ function oldest(b: Buyer): string {
 }
 
 /** A buyer not yet on PayPal (P3 §M M9): the row still opens; the buyer page finishes or retries. */
-function SetupNote({ b }: { b: Buyer }) {
+function SetupNote({ b, gaveUp }: { b: Buyer; gaveUp: boolean }) {
   if (b.paypal_setup === "READY") return null;
-  return (
-    <span className="block text-xs text-muted">
-      {b.paypal_setup === "FAILED" ? "Couldn't set up on PayPal — open to retry" : "Setting up on PayPal…"}
-    </span>
+  return b.paypal_setup === "FAILED" || gaveUp ? (
+    <span className="block text-xs text-danger">Couldn&apos;t set up on PayPal — open to retry</span>
+  ) : (
+    <span className="block text-xs text-muted">Setting up on PayPal…</span>
   );
 }
+
+const POLL_MS = 2000; // refetch while a buyer is setting up (P3 §M M9)…
+const POLL_FOR_MS = 30000; // …for at most 30 s; then the row offers retry on its buyer page
 
 export function Overview() {
   const [reload, setReload] = useState(0);
@@ -36,6 +39,18 @@ export function Overview() {
   // null until known: the banner must not appear after the page and push buttons down
   const [demo, setDemo] = useState<boolean | null>(null);
   const [decided, setDecided] = useState<Card[]>([]);
+  const opened = useRef<number | null>(null);
+  const [gaveUp, setGaveUp] = useState(false);
+  const settingUp = data?.buyers.some((b) => b.paypal_setup === "SETTING_UP") ?? false;
+  useEffect(() => {
+    if (!settingUp || gaveUp) return;
+    const t = setTimeout(() => {
+      opened.current ??= Date.now() - POLL_MS;
+      if (Date.now() - opened.current >= POLL_FOR_MS) setGaveUp(true);
+      else setReload((n) => n + 1);
+    }, POLL_MS);
+    return () => clearTimeout(t);
+  }, [settingUp, gaveUp, data]);
   useEffect(() => {
     api
       .config()
@@ -91,7 +106,7 @@ export function Overview() {
                   <Link href={`/supplier/buyers/${b.id}`} className="font-medium text-accent underline">
                     {b.name}
                   </Link>
-                  <SetupNote b={b} />
+                  <SetupNote b={b} gaveUp={gaveUp} />
                   <p className="tabular mt-1">
                     Owes {formatCents(b.owed_cents)} · oldest {oldest(b)}
                   </p>
@@ -120,7 +135,7 @@ export function Overview() {
                       <Link href={`/supplier/buyers/${b.id}`} className="font-medium text-accent underline">
                         {b.name}
                       </Link>
-                      <SetupNote b={b} />
+                      <SetupNote b={b} gaveUp={gaveUp} />
                       {b.promise && (
                         <span className="block text-xs text-muted">Promised {longDate(b.promise)}</span>
                       )}
