@@ -5,7 +5,7 @@
 **Try it:** https://memo-to-cash-web.onrender.com → **Start the demo** (no sign-up; PayPal sandbox; the sandbox buyer login is shown on the page) · **Video:** https://youtu.be/-We_CoCbR0k .
 
 ![The buyer's statement](docs/img/statement-1.png)
-
+<img src="docs/img/statement-1.png" alt="The buyer's statement" width="49%"> <img src="docs/img/proposal-approved.png" alt="The supplier approves the AI's proposal" width="49%">
 ---
 
 ## Why I built this
