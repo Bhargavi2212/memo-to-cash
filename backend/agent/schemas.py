@@ -81,3 +81,24 @@ ANSWER_SCHEMA = {
         "additionalProperties": False,
     },
 }
+
+
+class ReminderDraft(BaseModel):
+    """Job C (P3b B6; BACKEND_SCHEMA §5): a payment reminder the supplier approves before PayPal
+    sends it. `send_after` is shown as a suggested date only (plan G11)."""
+
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=500)
+    send_after: str  # YYYY-MM-DD, checked by code (≥ today)
+
+
+REMINDER_SCHEMA = {
+    "name": "reminder",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {"text": {"type": "string"}, "send_after": {"type": "string"}},
+        "required": ["text", "send_after"],
+        "additionalProperties": False,
+    },
+}

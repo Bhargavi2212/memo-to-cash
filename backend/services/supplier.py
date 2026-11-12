@@ -112,7 +112,29 @@ class ProposalCard(BaseModel):
 def _source(p: Proposal) -> str:
     if p.evidence.get("fallback") or "fallback_day" in p.payload:
         return "fallback"
-    return "seed" if p.evidence.get("source") == "seed" else "agent"
+    src = p.evidence.get("source")
+    if src in ("system", "return_check"):  # made by our code (D23 note, P3b return check)
+        return "system"
+    return "seed" if src == "seed" else "agent"
+
+
+def _reminder_state(session: Session, inv: Invoice, today: date) -> str | None:
+    """P3b F10 for the buyer page: AVAILABLE (show "Draft a reminder"), PENDING (one is
+    waiting), or None (not past due / a promise stands → no button)."""
+    from backend.services import reminders
+
+    why = reminders.eligible(session, inv, today)
+    return "AVAILABLE" if why is None else ("PENDING" if why == "REMINDER_PENDING" else None)
+
+
+def _card_summary(p: Proposal, inv: Invoice | None) -> str | None:
+    """Supplier-only wording where the buyer-facing `summary()` doesn't fit: a reminder, and a
+    system note (P3b X6 — "internal" hides it from the buyer, not from the supplier)."""
+    if p.kind == "REMINDER":
+        return f"Payment reminder for {inv.erp_invoice_no if inv else 'an invoice'}"
+    if p.kind == "REPLY" and p.evidence.get("source") == "system" and p.payload.get("reason"):
+        return str(p.payload["reason"])
+    return None
 
 
 def cards(session: Session, proposals: list[Proposal]) -> list[ProposalCard]:
@@ -148,7 +170,8 @@ def cards(session: Session, proposals: list[Proposal]) -> list[ProposalCard]:
                 status=p.status,
                 source=_source(p),
                 buyer={"id": p.buyer_id, "name": buyers[p.buyer_id].name},
-                summary=summary(
+                summary=_card_summary(p, inv)
+                or summary(
                     p.kind,
                     invoice_no=inv.erp_invoice_no if inv else None,
                     sku=proposal_sku(p),
@@ -297,6 +320,7 @@ def buyer_detail(
             "paypal_due_cents": row.paypal_due_cents,
             "paypal_synced_at": row.paypal_synced_at,
             "mismatch": row.mismatch,
+            "reminder": _reminder_state(session, invs[i.id], today),
             "adjustments": adj.get(i.id, []),
         })  # fmt: skip
     msgs = session.scalars(

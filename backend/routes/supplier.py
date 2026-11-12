@@ -9,18 +9,19 @@ from collections.abc import Callable
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, StrictInt
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from backend.agent import llm
 from backend.core.config import Settings, get_settings
 from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import demo, mirror, payments, proposals
+from backend.services import demo, imports, mirror, payments, proposals, reminders, sync
 from backend.services import supplier as svc
 
 router = APIRouter(prefix="/api/supplier")
@@ -85,14 +86,27 @@ def proposal_list(
 
 
 @router.get("/payments/{payment_id}")
-def payment(
+async def payment(
     payment_id: int,
     request: Request,
-    session: Annotated[Session, Depends(get_session)],
+    pp: Annotated[PayPal, Depends(get_paypal)],
     settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+    live: bool = False,
 ) -> Any:
+    """`?live=1` (P3b step 5, A4): first the scope check, then ask PayPal (≤ 5 s, one fetch
+    per payment at a time) and answer with what's stored after it."""
+
+    def detail() -> Any:
+        with session_factory() as s:
+            return svc.payment_detail(s, _scope(request, s, settings), payment_id)
+
     try:
-        return svc.payment_detail(session, _scope(request, session, settings), payment_id)
+        out = await run_in_threadpool(detail)
+        if live:
+            await sync.refresh_payment(session_factory, pp, payment_id)
+            out = await run_in_threadpool(detail)
+        return out
     except svc.ScopeError as e:
         return _error(e.status, e.code, e.message)
     except svc.NotFoundError:
@@ -214,3 +228,85 @@ async def buyer_setup(
     except svc.NotFoundError:
         return _error(404, *NOT_FOUND)
     return {"paypal_setup": await mirror.ensure_setup(bid, pp, settings, session_factory)}
+
+
+def _reminder_target(
+    request: Request, session_factory: Callable[[], Session], settings: Settings, invoice_id: int
+) -> int:
+    from backend.db.models import Invoice
+
+    with session_factory() as s:
+        inv = s.get(Invoice, invoice_id)
+        if inv is None:
+            raise svc.NotFoundError
+        svc.buyer_in_scope(s, _scope(request, s, settings), inv.buyer_id)  # 404 out of scope
+        return inv.id
+
+
+@router.post("/invoices/{invoice_id}/reminder")
+async def draft_reminder(
+    invoice_id: int,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+    client: Annotated[Any, Depends(llm.get_job_client)],
+) -> Any:
+    """P3b B6 "Draft a reminder" (buyer page, demo copies too): the agent drafts → a PENDING
+    REMINDER card. Not past due / promise / one pending → 422/409; draft failed → 503."""
+    try:
+        iid = await run_in_threadpool(
+            _reminder_target, request, session_factory, settings, invoice_id
+        )
+        proposal_id = await reminders.draft(session_factory, iid, client=client, actor="supplier")
+    except svc.ScopeError as e:
+        return _error(e.status, e.code, e.message)
+    except svc.NotFoundError:
+        return _error(404, *NOT_FOUND)
+    except reminders.ReminderError as e:
+        return _error(e.status, e.code, e.message)
+    with session_factory() as s:
+        from backend.db.models import Proposal
+
+        return svc.cards(s, [s.get(Proposal, proposal_id)])[0]
+
+
+@router.get("/import/sample.csv")
+def import_sample() -> Response:
+    """The three-buyer sample file, built now with today's dates (P3b G6). Public: demo data,
+    no secrets."""
+    return Response(
+        imports.sample_csv(today_ny()),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="sample_export.csv"'},
+    )
+
+
+@router.post("/import")
+async def import_file(
+    file: UploadFile,
+    request: Request,
+    pp: Annotated[PayPal, Depends(get_paypal)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+) -> Any:
+    """FR-1 / P3b B7: admin only (a demo cookie can't import → 404, F7). CSV ≤ 1 MB."""
+
+    def admin_only() -> None:
+        with session_factory() as s:
+            if _scope(request, s, settings).buyer_ids is not None:
+                raise svc.NotFoundError
+
+    try:
+        await run_in_threadpool(admin_only)
+    except svc.ScopeError as e:
+        return _error(e.status, e.code, e.message)
+    except svc.NotFoundError:
+        return _error(404, *NOT_FOUND)
+    raw = await file.read(imports.MAX_BYTES + 1)
+    if len(raw) > imports.MAX_BYTES:
+        return _error(413, "FILE_TOO_LARGE", "The file is over 1 MB")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _error(422, "BAD_FILE", "The file isn't UTF-8 text (CSV)")
+    return await imports.run_import(session_factory, pp, settings, text)

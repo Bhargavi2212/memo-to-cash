@@ -27,8 +27,8 @@ def answer(text: str, cited: list[str], confidence: str = "high") -> dict:
 
 
 class FakeLLM:
-    def __init__(self, triage=(), answer=(), delay: float = 0.0):
-        self.script = {"triage": list(triage), "answer": list(answer)}
+    def __init__(self, triage=(), answer=(), delay: float = 0.0, reminder=()):
+        self.script = {"triage": list(triage), "answer": list(answer), "reminder": list(reminder)}
         self.delay = delay
         self.calls: list[dict] = []
         self.options: list[dict] = []

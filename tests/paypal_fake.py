@@ -107,6 +107,8 @@ class FakePayPal:
             return ("send", path.split("/")[-2])
         if m == "POST" and path.endswith("/payments"):
             return ("record", path.split("/")[-2])
+        if m == "POST" and path.endswith("/remind"):
+            return ("remind", path.split("/")[-2])
         if m == "GET" and path.startswith(base + "/"):
             return ("get", path.split("/")[-1])
         if m == "PUT" and path.startswith(base + "/"):
@@ -227,6 +229,8 @@ class FakePayPal:
             op, key = "send", path.split("/")[-2]
         elif request.method == "POST" and path.endswith("/payments"):
             op, key = "record", path.split("/")[-2]
+        elif request.method == "POST" and path.endswith("/remind"):
+            op, key = "remind", path.split("/")[-2]
         elif request.method == "GET" and path.startswith(base + "/"):
             op, key = "get", path.split("/")[-1]
         elif request.method == "PUT" and path.startswith(base + "/"):
@@ -261,6 +265,8 @@ class FakePayPal:
             return httpx.Response(200, json=inv)
         if op == "record":
             return self.record(key, body)
+        if op == "remind":  # proved in P3b: empty 2xx, no limit enforced by the sandbox
+            return httpx.Response(204)
         if op == "put":
             return self.put(key, body, request)
         # send

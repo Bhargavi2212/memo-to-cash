@@ -22,8 +22,12 @@ from tests.paypal_fake import error
 
 
 def record(c, buyer_id, uid=None, **body):
-    payload = {"buyer_id": buyer_id, "client_uid": str(uid or uuid.uuid4()), "method": "CHECK",
-               "reference": "1043"} | body  # fmt: skip
+    payload = {
+        "buyer_id": buyer_id,
+        "client_uid": str(uid or uuid.uuid4()),
+        "method": "CHECK",
+        "reference": "1043",
+    } | body
     return c.post("/api/supplier/payments/record", json=payload)
 
 
@@ -45,7 +49,8 @@ def test_a_cheque_splits_oldest_first_and_is_recorded_on_paypal(clients, db, fak
     assert body["source"] == "OFF_PAYPAL" and body["status"] == "RECORDED"
     assert body["repeat"] is False and body["received_at"] == today_ny().isoformat()
     assert [(x["invoice_no"], x["amount_cents"]) for x in body["allocations"]] == [
-        ("INV-1038", 200000)]  # fmt: skip
+        ("INV-1038", 200000)
+    ]
     db.expire_all()
     (alloc,) = db.scalars(select(Allocation)).all()
     assert alloc.record_state == "RECORDED"  # the background job ran
@@ -58,8 +63,9 @@ def test_a_cheque_splits_oldest_first_and_is_recorded_on_paypal(clients, db, fak
     (pay,) = s["payments"]
     assert pay["source"] == "OFF_PAYPAL" and pay["method"] == "CHECK"
     assert db.get(Payment, body["payment_id"]).uid == uid
-    inv = db.scalars(select(Invoice).where(Invoice.erp_invoice_no == "INV-1038",
-                                           Invoice.buyer_id == bid)).one()  # fmt: skip
+    inv = db.scalars(
+        select(Invoice).where(Invoice.erp_invoice_no == "INV-1038", Invoice.buyer_id == bid)
+    ).one()
     assert inv.paid_cents == 200000 and inv.ledger_status == "PARTIALLY_PAID"
 
 
@@ -124,8 +130,14 @@ def test_a_back_dated_wire_keeps_its_date(clients, db, fake):
     a, _ = clients
     bid = start(a, "8.8.8.7")["buyer_id"]
     day = today_ny() - timedelta(days=3)
-    r = record(a, bid, amount_cents=10000, method="WIRE_TRANSFER", reference="FED 77",
-               received_on=day.isoformat())  # fmt: skip
+    r = record(
+        a,
+        bid,
+        amount_cents=10000,
+        method="WIRE_TRANSFER",
+        reference="FED 77",
+        received_on=day.isoformat(),
+    )
     assert r.json()["received_at"] == day.isoformat()
     (sent,) = record_bodies(fake)
     assert sent["payment_date"] == day.isoformat() and sent["method"] == "WIRE_TRANSFER"
@@ -150,9 +162,17 @@ def test_admin_can_record_for_a_demo_copy(clients, db):
     a, _ = clients
     bid = start(a, "8.8.8.9")["buyer_id"]
     a.cookies.clear()
-    r = a.post("/api/supplier/payments/record", headers=AUTH,
-               json={"buyer_id": bid, "client_uid": str(uuid.uuid4()), "method": "OTHER",
-                     "reference": "Zelle 5521", "amount_cents": 10000})  # fmt: skip
+    r = a.post(
+        "/api/supplier/payments/record",
+        headers=AUTH,
+        json={
+            "buyer_id": bid,
+            "client_uid": str(uuid.uuid4()),
+            "method": "OTHER",
+            "reference": "Zelle 5521",
+            "amount_cents": 10000,
+        },
+    )
     assert r.status_code == 200 and r.json()["method"] == "OTHER"
 
 
@@ -176,8 +196,11 @@ def test_payment_detail_shows_split_stored_paypal_values_and_timeline(clients, d
     first = d["allocations"][0]
     assert first["paypal_status"] == "MARKED_AS_PAID" and first["paypal_due_cents"] == 0
     steps = [(e["action"], e["invoice_no"]) for e in d["timeline"]]
-    assert steps == [("payment.recorded", None), ("allocation.recorded", "INV-1038"),
-                     ("allocation.recorded", "INV-1042")]  # fmt: skip
+    assert steps == [
+        ("payment.recorded", None),
+        ("allocation.recorded", "INV-1038"),
+        ("allocation.recorded", "INV-1042"),
+    ]
     start(b, "9.9.9.2")
     assert b.get(f"/api/supplier/payments/{pid}").status_code == 404  # another visitor
     assert a.get("/api/supplier/payments/999999").status_code == 404
@@ -187,13 +210,51 @@ def test_a_cheque_on_harbor_splits_oldest_first(clients, db, fake):
     """P3 §M M6/M7: Harbor Gems works like Northside — INV-1055 ($1,450, older) first."""
     a, _ = clients
     start(a, "8.2.2.1")
-    harbor = next(x for x in a.get("/api/supplier/overview").json()["buyers"]
-                  if x["name"] == "Harbor Gems")  # fmt: skip
+    harbor = next(
+        x for x in a.get("/api/supplier/overview").json()["buyers"] if x["name"] == "Harbor Gems"
+    )
     r = record(a, harbor["id"], amount_cents=200000)
     assert r.status_code == 200, r.text
     assert [(x["invoice_no"], x["amount_cents"]) for x in r.json()["allocations"]] == [
-        ("INV-1055", 145000), ("INV-1058", 55000)]  # fmt: skip
+        ("INV-1055", 145000),
+        ("INV-1058", 55000),
+    ]
     over = record(a, harbor["id"], amount_cents=30001)  # $300.01 > the $300.00 left
     assert over.status_code == 422 and over.json()["error"]["code"] == "AMOUNT_EXCEEDS_SELECTED"
     s = statement(a, db, harbor["id"])
     assert s["owed_cents"] == 30000
+
+
+def test_payment_page_live_fetch_asks_paypal_and_stores_what_it_says(clients, db, fake):
+    """P3b step 5 (A4): ?live=1 GETs each invoice of the payment from PayPal, ≤ 5 s."""
+    a, b = clients
+    bid = start(a, "9.9.9.3")["buyer_id"]
+    pid = record(a, bid, amount_cents=400000).json()["payment_id"]
+    i42 = db.scalars(
+        select(Invoice).where(Invoice.buyer_id == bid, Invoice.erp_invoice_no == "INV-1042")
+    ).one()
+    fake.pay_elsewhere(i42.paypal_invoice_id, 100000)  # PayPal changed meanwhile
+    fake.calls.clear()
+    d = a.get(f"/api/supplier/payments/{pid}?live=1").json()
+    assert fake.ops().count("get") == 2  # one GET per invoice in the split
+    row = next(x for x in d["allocations"] if x["invoice_no"] == "INV-1042")
+    assert row["paypal_due_cents"] == 200000 and row["mismatch"]  # shown, ours untouched
+    db.expire_all()
+    assert db.get(Invoice, i42.id).paid_cents == 50000
+    start(b, "9.9.9.4")
+    fake.calls.clear()
+    assert b.get(f"/api/supplier/payments/{pid}?live=1").status_code == 404
+    assert fake.calls == []  # scope first: another visitor never makes us call PayPal
+
+
+def test_payment_page_live_fetch_falls_back_to_stored_values(clients, db, fake, monkeypatch):
+    from backend.services import sync
+
+    a, _ = clients
+    bid = start(a, "9.9.9.5")["buyer_id"]
+    pid = record(a, bid, amount_cents=400000).json()["payment_id"]
+    monkeypatch.setattr(sync, "LIVE_FETCH_S", 0.2)
+    fake.delay["get"] = 1.0
+    r = a.get(f"/api/supplier/payments/{pid}?live=1")
+    assert r.status_code == 200
+    assert r.json()["allocations"][0]["paypal_status"] == "MARKED_AS_PAID"  # the stored value

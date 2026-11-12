@@ -59,6 +59,8 @@ services:
         sync: false
       - key: SANDBOX_BUYER_PASSWORD
         sync: false
+      - key: PAYPAL_WEBHOOK_ID # P3b G18: the sandbox app's webhook id (dashboard)
+        sync: false
 
   - type: web
     name: memo-to-cash-web
@@ -78,3 +80,30 @@ services:
           type: web
           name: memo-to-cash-api
           property: hostport
+
+  # P3b B5: the sweep + Job C's daily run (backend/worker.py). Adaptive: 30 s while active,
+  # 60 min when idle (Neon can sleep). Starter plan (~$7/mo, credits) — Bhargavi confirms the
+  # price at Blueprint sync (G13). Secrets are typed in the dashboard after the sync.
+  - type: worker
+    name: memo-to-cash-worker
+    runtime: python
+    plan: starter
+    region: virginia
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.worker
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - fromGroup: mtc-shared
+      - key: DATABASE_URL # Neon main branch, pooled (same as the api)
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_BUSINESS_EMAIL # invoice create in the sweep's PayPal setup
+        sync: false
+      - key: LLM_API_KEY # Job C drafts
+        sync: false

@@ -162,7 +162,7 @@ export interface ProposalCard {
   id: number;
   kind: "ADJUSTMENT" | "RETURN_CHECK" | "REMINDER" | "REPLY" | "PROMISE_NOTE";
   status: "PENDING" | "APPROVED" | "REJECTED" | "DONE" | "FAILED";
-  source: "agent" | "seed" | "fallback";
+  source: "agent" | "seed" | "fallback" | "system";
   buyer: { id: number; name: string };
   summary: string;
   checks: string[];
@@ -221,6 +221,7 @@ export interface SupplierInvoice extends Invoice {
   paypal_synced_at: string | null;
   mismatch: string | null;
   adjustments: { name: string; amount_cents: number }[];
+  reminder: "AVAILABLE" | "PENDING" | null; // P3b F10: "Draft a reminder" button state
 }
 
 export interface BuyerDetail {
@@ -281,8 +282,14 @@ export interface PaymentDetail {
 
 export interface DecideBody {
   decision: "APPROVE" | "REJECT";
-  mode?: "APPLY" | "CREDIT";
-  edits?: { amount_cents?: number; reason?: string; text?: string };
+  mode?: "APPLY" | "CREDIT" | "SPLIT";
+  edits?: {
+    amount_cents?: number;
+    reason?: string;
+    text?: string;
+    promise_date?: string; // PROMISE_NOTE (P3b step 5)
+    resolution?: "CREDIT_LINE" | "ASK_FOR_SLIP"; // RETURN_CHECK (P3b step 5)
+  };
 }
 
 export interface RecordBody {
@@ -344,6 +351,40 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const post = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
 const enc = encodeURIComponent;
 
+/** P3b B7 import result (BACKEND_SCHEMA §2). */
+export interface ImportResult {
+  created: Record<string, number>;
+  updated: Record<string, number>;
+  errors: { row: number; msg: string }[];
+  mirrored: number;
+  mirror_errors: { invoice_no: string; msg: string }[];
+  setting_up: number;
+  buyers: { id: number; name: string; statement_url: string; paypal_setup: PaypalSetupState }[];
+}
+
+/** Multipart upload with the admin token (never stored — kept in the page's memory, X3). */
+async function importCsv(adminToken: string, file: File): Promise<ImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  let res: Response;
+  try {
+    res = await fetch("/api/supplier/import", {
+      method: "POST",
+      body: form, // the browser sets the multipart content type
+      headers: { authorization: `Bearer ${adminToken}` },
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(0, "NETWORK", "We couldn't reach the server. Check your connection and try again.");
+  }
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = body?.error;
+    throw new ApiError(res.status, err?.code ?? "UNKNOWN", err?.message ?? "Something went wrong.");
+  }
+  return body as ImportResult;
+}
+
 export const api = {
   config: () => call<PublicConfig>("/config"),
   startDemo: () => call<DemoStart>("/demo/start", post({})),
@@ -367,10 +408,14 @@ export const api = {
   supplier: {
     overview: () => call<SupplierOverview>("/supplier/overview"),
     buyer: (id: number) => call<BuyerDetail>(`/supplier/buyers/${id}`),
-    payment: (id: number) => call<PaymentDetail>(`/supplier/payments/${id}`),
+    payment: (id: number, live = false) =>
+      call<PaymentDetail>(`/supplier/payments/${id}${live ? "?live=1" : ""}`),
     decide: (id: number, body: DecideBody) =>
       call<ProposalCard>(`/supplier/proposals/${id}/decide`, post(body)),
     record: (body: RecordBody) => call<RecordResult>("/supplier/payments/record", post(body)),
     setup: (id: number) => call<SetupResult>(`/supplier/buyers/${id}/setup`, post({})),
+    importCsv,
+    draftReminder: (invoiceId: number) =>
+      call<ProposalCard>(`/supplier/invoices/${invoiceId}/reminder`, post({})),
   },
 };

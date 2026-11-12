@@ -100,17 +100,18 @@ Other labels: RETURN_CLAIM → RETURN_CHECK proposal with evidence MATCH / NO_RE
 1. Upload CSV → validate every row first; a file with **any** invalid row writes nothing and returns all errors with row numbers.
 2. Upsert buyers, memos, lines, returns, invoices.
 3. For each invoice without `paypal_invoice_id`: create + send on PayPal (`PayPal-Request-Id` = `<env>-inv-<invoice uid>`) → store id + payer URL; on retry search by number first (P1 D4); a failure stores `mirror_error` and increments `mirror_attempts`.
-4. Summary: `{created, updated, errors, mirrored, mirror_errors}` (BACKEND_SCHEMA §2). Endpoint and screen are built in P3; the importer service in P1.
+4. Summary: `{created, updated, errors, mirrored, mirror_errors, setting_up, buyers}` (BACKEND_SCHEMA §2) — step 3 runs through phase M's per-buyer setup and the request waits at most 20 s; anything slower finishes in the background (the buyer shows "Setting up on PayPal…" until then). Each buyer is listed with its statement link. Page `/supplier/import`: admin token in a password field, memory only; judges have no token, so the video shows it (P3b F7, X3).
 
 ## 6. Journey J6 — Buyer pays one invoice directly on PayPal's page
 1. PayPal sends `INVOICING.INVOICE.PAID` → `/paypal/webhook`. (`PAYMENT.CAPTURE.COMPLETED` for a statement order → lost-capture recovery, TRD §6b-2.)
 2. Verify signature → store event (unique id) → 200.
 3. Process exactly per **TRD §6b**: if the invoice has an allocation in `RECORDING`, leave the event for the sweep; otherwise GET the invoice → list `payments.transactions` → a transaction is ours if it matches `allocations.paypal_transaction_id` **or** its note has the exact token `[MTC:<allocation uid>]` → only unmatched ones become new payments (source `PAYPAL_INVOICE_PAGE`) → update `paid_cents`, status.
-4. Statement and supplier view reflect it on next load.
+4. Statement and supplier view reflect it: an open statement refetches when its tab becomes visible again (P3b F3 — e.g. coming back from PayPal's page; never during a payment), and Pay refuses an order for an invoice PayPal shows paid meanwhile (409 `PAID_ELSEWHERE`, F4) — even if the webhook hasn't arrived yet. The api log line `sync.backfill … via=webhook|pay_check|sweep` says which path took it in (X7).
 
 ## 7. Journey J7 — Reminder
 1. Once a day the background worker (09:00 America/New_York) → find invoices past due with no promise → agent drafts `ReminderDraft` → proposal REMINDER.
-2. Supplier approves → check `reminders_sent` (< 2 today) → `POST /invoices/{id}/remind` → PayPal emails the buyer → audit.
+2. Supplier approves (may edit the text) → check `reminders_sent` (< 2 today, NY — PayPal's limit, which the sandbox doesn't enforce, so we do) → `POST /invoices/{id}/remind` → PayPal emails the buyer → audit.
+3. Demo copies have no daily run: the buyer page shows **"Draft a reminder"** on each past-due invoice without an active promise (Northside INV-1038, Lakeside INV-1040) — same drafting code (P3b B6, F9, F10). A draft that states anything not in the records is thrown away ("Couldn't draft a reminder — try again").
 
 ## 7b. Journey J8 — Supplier records a cheque
 1. Supplier opens buyer → "Record payment" → method (Cheque/Wire/Other), reference (cheque no.), amount, optional invoices.

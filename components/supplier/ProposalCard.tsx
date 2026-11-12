@@ -14,6 +14,7 @@ const SOURCE: Record<Card["source"], string> = {
   agent: "agent",
   seed: "seed",
   fallback: "assistant couldn't answer",
+  system: "automatic",
 };
 
 function approveLabel(c: Card): string {
@@ -25,6 +26,7 @@ function approveLabel(c: Card): string {
   }
   if (c.kind === "PROMISE_NOTE") return "Noted";
   if (c.kind === "REPLY") return "Send reply";
+  if (c.kind === "REMINDER") return "Send reminder on PayPal";
   return "Reply";
 }
 
@@ -39,8 +41,13 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
   const [amount, setAmount] = useState(
     card.payload.amount_cents ? (Math.abs(card.payload.amount_cents) / 100).toFixed(2) : "",
   );
-  const [mode, setMode] = useState<"APPLY" | "CREDIT" | null>(null);
-  const [text, setText] = useState("");
+  const [mode, setMode] = useState<"APPLY" | "CREDIT" | "SPLIT" | null>(null);
+  const [promiseDate, setPromiseDate] = useState(
+    typeof card.payload.promise_date === "string" ? card.payload.promise_date : "",
+  );
+  const isReminder = card.kind === "REMINDER";
+  const draftText = typeof card.payload.text === "string" ? card.payload.text : "";
+  const [text, setText] = useState(isReminder ? draftText : "");
 
   const isAdj = card.kind === "ADJUSTMENT";
   const needsText = card.kind === "REPLY" || card.kind === "RETURN_CHECK";
@@ -67,6 +74,12 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
       if (mode) body.mode = mode;
     }
     if (needsText && text.trim()) body.edits = { text: text.trim() };
+    if (card.kind === "PROMISE_NOTE" && promiseDate && promiseDate !== card.payload.promise_date)
+      body.edits = { promise_date: promiseDate };
+    if (isReminder && text.trim() !== draftText) {
+      if (!text.trim()) return setError("Write the reminder, or reject it");
+      body.edits = { text: text.trim() };
+    }
     send(body);
   };
 
@@ -120,7 +133,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
           </label>
           <fieldset className="flex gap-4 text-sm">
             <legend className="sr-only">How to apply it</legend>
-            {(["APPLY", "CREDIT"] as const).map((m) => (
+            {(["APPLY", "CREDIT", "SPLIT"] as const).map((m) => (
               <label key={m} className="flex min-h-11 items-center gap-2">
                 <input
                   type="radio"
@@ -128,11 +141,41 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
                   checked={mode === m}
                   onChange={() => setMode(m)}
                 />
-                {m === "APPLY" ? "Take it off the invoice" : "Give it as credit"}
+                {m === "APPLY"
+                  ? "Take it off the invoice"
+                  : m === "CREDIT"
+                    ? "Give it as credit"
+                    : `Take ${formatCents(Math.min(card.due_cents ?? 0, Math.abs(card.payload.amount_cents ?? 0)))} off + credit the rest`}
               </label>
             ))}
           </fieldset>
         </div>
+      )}
+      {card.kind === "PROMISE_NOTE" && !rejecting && card.status === "PENDING" && (
+        <label className="mt-3 block text-sm">
+          Promised date (correct it if the buyer meant another day)
+          <input
+            type="date"
+            value={promiseDate}
+            onChange={(e) => setPromiseDate(e.target.value)}
+            className="mt-1 block min-h-11 rounded-card border border-line px-3"
+          />
+        </label>
+      )}
+      {isReminder && !rejecting && (
+        <label className="mt-3 block text-sm">
+          Reminder PayPal will email (edit before sending)
+          <textarea
+            value={text}
+            maxLength={500}
+            rows={4}
+            onChange={(e) => setText(e.target.value)}
+            className="mt-1 block w-full rounded-card border border-line px-3 py-2"
+          />
+          {typeof card.payload.send_after === "string" && (
+            <span className="text-xs text-muted">Suggested send date {card.payload.send_after}</span>
+          )}
+        </label>
       )}
       {(needsText || rejecting) && (
         <label className="mt-3 block text-sm">
@@ -203,6 +246,30 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
                 Mark as seen
               </button>
             )}
+            {card.kind === "RETURN_CHECK" && (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    send({ decision: "APPROVE", edits: { resolution: "CREDIT_LINE", ...(text.trim() ? { text: text.trim() } : {}) } })
+                  }
+                  className="min-h-11 rounded-card border border-line px-4"
+                >
+                  Credit {typeof card.payload.sku === "string" ? card.payload.sku : "the item"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    send({ decision: "APPROVE", edits: { resolution: "ASK_FOR_SLIP", ...(text.trim() ? { text: text.trim() } : {}) } })
+                  }
+                  className="min-h-11 rounded-card border border-line px-4"
+                >
+                  Ask for the return slip
+                </button>
+              </>
+            )}
             {isAdj && !editing && (
               <button
                 type="button"
@@ -241,6 +308,8 @@ export function resultLine(card: Card): { text: string; link: string | null } {
   if (r.reply_text) return { text: `Reply sent: “${r.reply_text}”`, link: null };
   if (card.kind === "PROMISE_NOTE") return { text: "Noted", link: null };
   if (card.kind === "REPLY") return { text: "Marked as seen", link: null };
+  if (card.kind === "REMINDER" && card.status === "DONE")
+    return { text: `Reminder sent on PayPal for ${card.invoice_no}`, link: card.paypal_url };
   return { text: card.status === "DONE" ? "Done" : card.status.toLowerCase(), link: null };
 }
 
