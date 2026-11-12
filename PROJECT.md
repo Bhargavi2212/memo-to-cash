@@ -72,7 +72,7 @@ memo-to-cash/
 │
 ├── backend/
 │   ├── main.py                     P0 FastAPI app (uvicorn) — Render api service
-│   ├── worker.py                   P3 background worker: sweep every 30 s + daily reminder drafting
+│   ├── worker.py                   P3b background worker: sweep — 30 s while active, 60 min idle — + Job C daily run (once per NY date ≥ 09:00)
 │   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2 · logging.py P2 (statement tokens out of access logs)
 │   ├── db/         session.py P0 (+ get_session_factory P2) · models.py P1 · migrations/ (Alembic) P0–P2
 │   ├── paypal/     client.py P1 · invoices.py P1 · orders.py P2 · webhooks.py P3
