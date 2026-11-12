@@ -40,6 +40,9 @@ def _signed(value: str) -> int:
     return -to_cents(value[1:]) if value.startswith("-") else to_cents(value)
 
 
+VERIFY_PATH = "/v1/notifications/verify-webhook-signature"
+
+
 class FakePayPal:
     def __init__(self) -> None:
         self.invoices: dict[str, dict[str, Any]] = {}
@@ -52,6 +55,7 @@ class FakePayPal:
         self.delay: dict[str, float] = {}  # op -> seconds (slow PayPal)
         self.requests: list[httpx.Request] = []  # every API request (headers for Request-Id)
         self.hooks: dict[str, Any] = {}  # op -> callable(request), run before answering
+        self.verify_status = "SUCCESS"  # what verify-webhook-signature answers (P3b)
         self._n = 0
 
     # -- helpers for tests --
@@ -93,6 +97,8 @@ class FakePayPal:
             return found
         path, m = request.url.path, request.method
         base = "/v2/invoicing/invoices"
+        if m == "POST" and path == VERIFY_PATH:
+            return ("verify", "")
         if m == "POST" and path == base:
             return ("create", "")
         if m == "POST" and path == "/v2/invoicing/search-invoices":
@@ -204,6 +210,15 @@ class FakePayPal:
                 return nxt
             return self._order(op, key, body)
         base = "/v2/invoicing/invoices"
+        if request.method == "POST" and path == VERIFY_PATH:
+            self.calls.append(("verify", ""))
+            queued = self.faults.get("verify")
+            if queued:
+                nxt = queued.pop(0)
+                if isinstance(nxt, Exception):
+                    raise nxt
+                return nxt
+            return httpx.Response(200, json={"verification_status": self.verify_status})
         if request.method == "POST" and path == base:
             op, key = "create", body["detail"]["invoice_number"]
         elif request.method == "POST" and path == "/v2/invoicing/search-invoices":
