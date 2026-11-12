@@ -8,7 +8,14 @@ import type { NextRequest } from "next/server";
 const REQUEST_HEADERS = ["accept", "authorization", "content-type", "cookie", "x-forwarded-for"];
 // Response headers worth returning (Set-Cookie is handled separately; encoding/length are
 // recomputed because fetch already decoded the body).
-const RESPONSE_HEADERS = ["content-type", "cache-control", "location", "www-authenticate"];
+// content-disposition: the import page's sample file downloads as sample_export.csv (P3b).
+const RESPONSE_HEADERS = [
+  "content-type",
+  "content-disposition",
+  "cache-control",
+  "location",
+  "www-authenticate",
+];
 
 function apiBase(): string {
   const base = process.env.API_INTERNAL_BASE; // optional full-URL override (risks table)
