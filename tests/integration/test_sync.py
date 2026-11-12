@@ -515,3 +515,50 @@ async def test_the_order_route_answers_409_paid_elsewhere(db, pp, fake, buyer, s
         "code": "PAID_ELSEWHERE",
         "message": "INV-1042 was paid on PayPal — your statement is updated.",
     }
+
+
+# ---------- step 1 adds (Bhargavi, Wed night): no webhook · single flight ----------
+
+
+async def test_without_a_webhook_the_sweep_reconciles_a_d23_overpay(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    i38 = inv(db, "INV-1038")
+    fake.pay_elsewhere(i38.paypal_invoice_id, 350000)
+    await pay.record_allocations(SessionLocal, pp, o.payment_id)  # FAILED overpay, no event
+    assert db.scalar(select(func.count()).select_from(WebhookEvent)) == 0
+    await sync.sweep(SessionLocal, pp, settings)
+    assert "INV-1038" not in allocs(db, o.payment_id)
+    assert payment(db, o.payment_id).unapplied_cents == 350000 and ledger_ok(db, "INV-1038")
+    via = db.scalars(select(AuditLog.detail).where(AuditLog.action == "sync.backfill")).one()
+    assert via["via"] == "sweep"
+    assert await sync.sweep(SessionLocal, pp, settings) == 0  # done: nothing left to look at
+
+
+async def test_an_overpay_with_nothing_new_on_paypal_is_looked_at_five_times(
+    db, pp, fake, buyer, settings
+):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    db.execute(
+        update(Allocation)
+        .where(Allocation.payment_id == o.payment_id)
+        .values(record_state="FAILED", paypal_record_error=f"{pay.OVERPAY_ISSUE}: test")
+    )
+    db.commit()
+    gets = []
+    for _ in range(7):
+        fake.calls.clear()
+        await sync.sweep(SessionLocal, pp, settings)
+        gets.append(fake.ops().count("get"))
+    assert sum(gets) == 10 and gets[-1] == 0  # 2 invoices × 5 looks, then it stops
+
+
+async def test_a_second_sweep_while_one_runs_is_skipped(db, pp, fake, buyer, settings):
+    o, _cap = await lost_capture(pp, fake, buyer)
+    age(db, Payment, o.payment_id, created_at=timedelta(minutes=3))
+    fake.delay["order_get"] = 0.5
+    first, second = await asyncio.gather(
+        sync.sweep(SessionLocal, pp, settings), sync.sweep(SessionLocal, pp, settings)
+    )
+    assert sorted([first, second]) == [0, 1]  # one did the work, the other returned at once
+    assert fake.ops().count("order_get") == 1
+    assert await sync.sweep(SessionLocal, pp, settings) == 0  # the flag was released

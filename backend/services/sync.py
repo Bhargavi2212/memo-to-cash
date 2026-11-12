@@ -578,9 +578,17 @@ class SweepWork:
     capture_pending: list[int] = field(default_factory=list)
     recording: list[int] = field(default_factory=list)  # payment ids to resolve_recording
     mirror: list[int] = field(default_factory=list)  # buyer ids with DRAFT invoices
+    overpaid: list[int] = field(default_factory=list)  # invoice ids with a D23 FAILED overpay
 
     def total(self) -> int:
-        parts = (self.events, self.created, self.capture_pending, self.recording, self.mirror)
+        parts = (
+            self.events,
+            self.created,
+            self.capture_pending,
+            self.recording,
+            self.mirror,
+            self.overpaid,
+        )
         return sum(len(p) for p in parts)
 
 
@@ -643,7 +651,41 @@ def _find_work(session_factory: Callable[[], Session], now: datetime) -> SweepWo
                 )
             )
         )
+        # the webhook never came: our record was refused as an overpay (D23) → reconcile here
+        w.overpaid = sorted(
+            set(
+                s.scalars(
+                    select(Allocation.invoice_id).where(
+                        Allocation.record_state == "FAILED",
+                        Allocation.paypal_record_error.startswith(payments.OVERPAY_ISSUE),
+                        Allocation.attempts < MAX_RECORD_ATTEMPTS,
+                    )
+                )
+            )
+        )
     return w
+
+
+def _bump_overpay_attempts(session_factory: Callable[[], Session], invoice_id: int) -> None:
+    """PayPal showed nothing to take in yet: count the try, so an invoice is looked at no more
+    than MAX_RECORD_ATTEMPTS times (no endless GETs)."""
+    with session_factory() as s, s.begin():
+        for a in s.scalars(
+            select(Allocation).where(
+                Allocation.invoice_id == invoice_id,
+                Allocation.record_state == "FAILED",
+                Allocation.paypal_record_error.startswith(payments.OVERPAY_ISSUE),
+            )
+        ):
+            a.attempts += 1
+
+
+async def _sweep_overpaid(
+    session_factory: Callable[[], Session], pp: PayPal, invoice_id: int
+) -> None:
+    out = await reconcile_invoice(session_factory, pp, invoice_id, via="sweep")
+    if out.state == "unchanged":
+        await run_in_threadpool(_bump_overpay_attempts, session_factory, invoice_id)
 
 
 async def _finish_and_record(
@@ -708,6 +750,9 @@ async def _sweep_capture_pending(
         await _finish_and_record(session_factory, pp, payment_id, cap)
 
 
+_sweeping = False  # single flight per process (the worker loop and webhook tasks share it)
+
+
 async def sweep(
     session_factory: Callable[[], Session],
     pp: PayPal,
@@ -718,11 +763,27 @@ async def sweep(
     """All pending PayPal work, one function (TRD §6b-4; B4 + G6 + F8): unprocessed webhook
     events · CREATED payments > 2 min · CAPTURE_PENDING payments · RECORDING allocations stuck
     > 5 min · DRAFT invoices of real or ready demo buyers (phase M setup
-    path, ≤ 5 attempts). Each item in its own transaction(s); an error is logged and left for
-    the next run. Returns how many items it looked at (the worker's "did work" signal)."""
+    path, ≤ 5 attempts) · invoices whose record PayPal refused as an overpay (D23 reconcile
+    when the webhook never came, ≤ 5 looks). Each item in its own transaction(s); an error is
+    logged and left for the next run. Returns how many items it looked at (the worker's "did
+    work" signal). One sweep at a time per process: a second call while one runs returns 0 at
+    once (the running one already covers its work; anything newer waits for the next)."""
+    global _sweeping
+    if _sweeping:
+        log.info("sweep skipped: one is already running")
+        return 0
+    _sweeping = True
+    try:
+        return await _sweep(session_factory, pp, settings, now or datetime.now(UTC))
+    finally:
+        _sweeping = False
+
+
+async def _sweep(
+    session_factory: Callable[[], Session], pp: PayPal, settings: Settings, when: datetime
+) -> int:
     from backend.services import mirror
 
-    when = now or datetime.now(UTC)
     w = await run_in_threadpool(_find_work, session_factory, when)
     for i in w.events:
         await _safely("event", i, process_event(session_factory, pp, settings, i, now=when))
@@ -734,14 +795,18 @@ async def sweep(
         await _safely("recording", i, payments.resolve_recording(session_factory, pp, i))
     for i in w.mirror:
         await _safely("mirror", i, mirror.ensure_setup(i, pp, settings, session_factory))
+    for i in w.overpaid:
+        await _safely("overpaid", i, _sweep_overpaid(session_factory, pp, i))
     if w.total():
         log.info(
-            "sweep: %d events, %d created, %d capture_pending, %d recording, %d mirror",
+            "sweep: %d events, %d created, %d capture_pending, %d recording, %d mirror, "
+            "%d overpaid",
             len(w.events),
             len(w.created),
             len(w.capture_pending),
             len(w.recording),
             len(w.mirror),
+            len(w.overpaid),
         )
     return w.total()
 
