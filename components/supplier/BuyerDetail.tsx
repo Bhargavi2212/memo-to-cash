@@ -187,6 +187,8 @@ export function BuyerDetail() {
       {recording && (
         <RecordPaymentModal
           buyerId={d.buyer.id}
+          buyerName={d.buyer.name}
+          owedCents={d.owed_cents}
           token={d.statement_token}
           onClose={(recorded) => {
             setRecording(false);

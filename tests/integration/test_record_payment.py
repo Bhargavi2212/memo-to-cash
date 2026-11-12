@@ -101,6 +101,25 @@ def test_scoping_and_validation(clients, db):
     assert db.scalar(select(func.count()).select_from(Payment)) == 0
 
 
+def test_an_over_amount_cheque_is_refused_and_records_nothing(clients, db, fake):
+    """More than the buyer owes → 422 and no trace: no payment, no allocation, no PayPal call,
+    invoices unchanged. Overpayments as credit are carried forward (P3 §8), not v1."""
+    a, _ = clients
+    buyer = start(a, "8.8.8.9")["buyer_id"]
+    owed = statement(a, db, buyer)["owed_cents"]
+    paid = lambda: [(i.id, i.paid_cents) for i in db.scalars(select(Invoice).order_by(Invoice.id))]  # noqa: E731
+    before = paid()
+    fake.requests.clear()
+    r = record(a, buyer, amount_cents=owed + 1)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "AMOUNT_EXCEEDS_SELECTED"
+    db.expire_all()
+    assert db.scalar(select(func.count()).select_from(Payment)) == 0
+    assert db.scalar(select(func.count()).select_from(Allocation)) == 0
+    assert paid() == before
+    assert fake.requests == []
+    assert record(a, buyer, amount_cents=owed).status_code == 200  # exactly what's owed is fine
+
+
 def test_a_back_dated_wire_keeps_its_date(clients, db, fake):
     a, _ = clients
     bid = start(a, "8.8.8.7")["buyer_id"]
