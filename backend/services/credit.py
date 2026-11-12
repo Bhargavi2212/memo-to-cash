@@ -22,7 +22,9 @@ def credit_from(payments: Iterable[Payment], proposals: Iterable[Proposal]) -> i
     credited = sum(
         int(p.payload.get("credit_cents") or 0)
         for p in proposals
-        if p.kind == "ADJUSTMENT" and p.status == "DONE" and p.payload.get("mode") == "CREDIT"
+        if p.kind == "ADJUSTMENT"
+        and p.status == "DONE"
+        and p.payload.get("mode") in ("CREDIT", "SPLIT")  # SPLIT: the part that didn't fit
     )
     return unapplied + credited
 

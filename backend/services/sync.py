@@ -825,3 +825,75 @@ async def process_then_sweep(
     queries unless something is stale — so a sleeping worker never delays the catch-up."""
     await process_event(session_factory, pp, settings, event_id)
     await sweep(session_factory, pp, settings)
+
+
+# ---------------------------------------------------------------- payment page live fetch (A4)
+
+LIVE_FETCH_S = 5.0
+_live: dict[int, "asyncio.Task[None]"] = {}
+
+
+def _store_paypal_view(
+    session_factory: Callable[[], Session], views: dict[int, dict[str, Any]]
+) -> None:
+    """PayPal's status/due as of now, on each invoice — ours never changes (ledger rule)."""
+    now = datetime.now(UTC)
+    with session_factory() as s, s.begin():
+        for invoice_id, pp_inv in views.items():
+            inv = s.get(Invoice, invoice_id)
+            if inv is None:
+                continue
+            inv.paypal_status = pp_inv.get("status") or inv.paypal_status
+            due_value = (pp_inv.get("due_amount") or {}).get("value")
+            if due_value is not None:
+                inv.paypal_due_cents = to_cents(str(due_value))
+                waiting = s.scalar(
+                    select(func.coalesce(func.sum(Allocation.amount_cents), 0)).where(
+                        Allocation.invoice_id == inv.id,
+                        Allocation.record_state.in_(("PENDING", "RECORDING")),
+                    )
+                )
+                ours = inv.total_cents - inv.paid_cents
+                inv.mismatch = (
+                    None
+                    if inv.paypal_due_cents in (ours, ours + (waiting or 0))
+                    else f"PayPal due {inv.paypal_due_cents} ≠ ours {ours} (cents)"
+                )
+            inv.paypal_synced_at = now
+
+
+async def _fetch_payment(
+    session_factory: Callable[[], Session], pp: PayPal, payment_id: int
+) -> None:
+    def targets() -> list[tuple[int, str]]:
+        with session_factory() as s:
+            rows = s.execute(
+                select(Invoice.id, Invoice.paypal_invoice_id)
+                .join(Allocation, Allocation.invoice_id == Invoice.id)
+                .where(Allocation.payment_id == payment_id, Invoice.paypal_invoice_id.is_not(None))
+            ).all()
+            return [(i, p) for i, p in rows]
+
+    pairs = await run_in_threadpool(targets)
+    got = await asyncio.gather(*(pinv.get(pp, p) for _, p in pairs), return_exceptions=True)
+    views = {i: g for (i, _), g in zip(pairs, got, strict=True) if isinstance(g, dict)}
+    if views:
+        await run_in_threadpool(_store_paypal_view, session_factory, views)
+
+
+async def refresh_payment(
+    session_factory: Callable[[], Session], pp: PayPal, payment_id: int
+) -> None:
+    """P3 A4 (moved to P3b): the payment page asks PayPal for each invoice's current status and
+    due, at most 5 s, one fetch in flight per payment (a second request joins it); on a timeout
+    or error the page shows the last stored values with their "last synced" time."""
+    task = _live.get(payment_id)
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = asyncio.get_running_loop().create_task(
+            _fetch_payment(session_factory, pp, payment_id)
+        )
+        _live[payment_id] = task
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=LIVE_FETCH_S)
+    except Exception:  # timeout / PayPal error → stored values (A4)
+        log.info("live fetch payment=%s didn't finish; showing stored values", payment_id)

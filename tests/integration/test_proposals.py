@@ -228,9 +228,51 @@ def test_explicit_credit_even_when_due_is_enough(api, db, fake, copy):
     assert db.get(Invoice, copy["invoice"]).total_cents == 142000
 
 
-def test_split_is_not_yet(api, db, copy):
+def part_paid(db, fake, copy, paid_cents):
+    """INV-1051 paid in part, in our ledger and on PayPal alike."""
+    inv = db.get(Invoice, copy["invoice"])
+    inv.paid_cents = paid_cents
+    inv.ledger_status = "PARTIALLY_PAID"
+    db.commit()
+    fake.record(
+        copy["paypal_id"],
+        {
+            "amount": {"value": f"{paid_cents / 100:.2f}"},
+            "note": "earlier payment",
+            "method": "OTHER",
+        },
+    )
+
+
+def test_split_deducts_what_is_due_and_credits_the_rest(api, db, fake, copy):
+    """P3b G15 (proved in the sandbox: a PUT to due $0.00 on a part-paid invoice works)."""
+    part_paid(db, fake, copy, 141000)  # $10.00 still due on INV-1051, the request is $20.00
     r = act(api, copy["proposal"], mode="SPLIT")
-    assert r.status_code == 422 and r.json()["error"]["code"] == "NOT_YET"
+    assert r.status_code == 200 and r.json()["status"] == "DONE", r.text
+    pl = r.json()["payload"]
+    assert (pl["mode"], pl["amount_cents"], pl["credit_cents"]) == ("SPLIT", -1000, 1000)
+    assert pl["original"]["amount_cents"] == -2000
+    db.expire_all()
+    inv = db.get(Invoice, copy["invoice"])
+    assert (inv.total_cents, inv.total_cents - inv.paid_cents, inv.mismatch) == (141000, 0, None)
+    assert fake.invoices[copy["paypal_id"]]["due_amount"]["value"] == "0.00"
+    st = statement(api, db, copy)
+    assert st["credit_cents"] == 1000
+    (req,) = [q for q in st["requests"] if q["id"] == copy["proposal"]]
+    assert req["summary"] == ("Approved — $10.00 off INV-1051 and $10.00 credit on your account")
+
+
+def test_split_falls_back_to_apply_or_credit(api, db, fake, copy):
+    r = act(api, copy["proposal"], mode="SPLIT")  # $1,420 due ≥ $20: it fits → APPLY
+    assert r.json()["payload"]["mode"] == "APPLY" and r.json()["payload"]["credit_cents"] == 0
+
+
+def test_split_with_nothing_due_is_all_credit(api, db, fake, copy):
+    pay_in_full(db, copy["invoice"])
+    calls = list(fake.ops())
+    r = act(api, copy["proposal"], mode="SPLIT")
+    assert r.json()["payload"]["mode"] == "CREDIT" and r.json()["payload"]["credit_cents"] == 2000
+    assert fake.ops() == calls  # no PayPal change
 
 
 def test_an_edited_amount_is_the_amount_everywhere(api, db, fake, copy):
@@ -315,11 +357,55 @@ def test_return_check_needs_a_reply_in_p3a(api, db, fake, copy):
     assert r.json()["status"] == "DONE" and fake.ops() == calls  # no line or money change
 
 
-def test_promise_note_approves_and_date_edits_wait(api, db, copy):
-    pid = add_proposal(db, copy, "PROMISE_NOTE", {"promise_date": "2026-11-13"})
-    r = act(api, pid, edits={"promise_date": "2026-11-20"})
-    assert r.status_code == 422 and r.json()["error"]["code"] == "NOT_YET"
-    assert act(api, pid).json()["status"] == "DONE"
+def test_promise_note_date_can_be_corrected(api, db, copy):
+    from datetime import timedelta
+
+    from backend.core.dates import today_ny
+
+    t = today_ny()
+    pid = add_proposal(
+        db, copy, "PROMISE_NOTE", {"promise_date": (t + timedelta(days=2)).isoformat()}
+    )
+    for bad in ("tomorrow", t.isoformat(), (t + timedelta(days=91)).isoformat()):
+        r = act(api, pid, edits={"promise_date": bad})
+        assert r.status_code == 422 and r.json()["error"]["code"] == "BAD_EDIT", bad
+    new = (t + timedelta(days=9)).isoformat()
+    r = act(api, pid, edits={"promise_date": new})
+    assert r.json()["status"] == "DONE" and r.json()["payload"]["promise_date"] == new
+    assert r.json()["payload"]["original"]["promise_date"] == (t + timedelta(days=2)).isoformat()
+
+
+def test_return_check_credit_line_files_a_deduction_for_the_supplier(api, db, fake, copy):
+    pid = add_proposal(db, copy, "RETURN_CHECK", {"sku": "S-104"})  # S-104 is KEPT on INV-1038
+    calls = list(fake.ops())
+    r = act(api, pid, edits={"resolution": "CREDIT_LINE"})
+    assert r.status_code == 200 and r.json()["status"] == "DONE", r.text
+    new_id = r.json()["result"]["adjustment_proposal_id"]
+    adj = db.get(Proposal, new_id)
+    assert (adj.kind, adj.status, adj.payload["amount_cents"], adj.payload["sku"]) == (
+        "ADJUSTMENT",
+        "PENDING",
+        -115000,
+        "S-104",
+    )
+    assert adj.evidence["source"] == "return_check" and fake.ops() == calls  # no money yet
+    (req,) = [q for q in statement(api, db, copy)["requests"] if q["id"] == pid]
+    assert req["reply"].startswith("Thanks — we'll credit S-104")
+
+
+def test_return_check_ask_for_slip_and_bad_resolutions(api, db, fake, copy):
+    pid = add_proposal(db, copy, "RETURN_CHECK", {"sku": "S-103"})  # S-103 is still OUT
+    r = act(api, pid, edits={"resolution": "CREDIT_LINE"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "NOT_KEPT"
+    r = act(api, pid, edits={"resolution": "REFUND"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "BAD_EDIT"
+    r = act(api, pid, edits={"resolution": "ASK_FOR_SLIP"})
+    assert r.json()["status"] == "DONE" and r.json()["result"]["resolution"] == "ASK_FOR_SLIP"
+    (req,) = [q for q in statement(api, db, copy)["requests"] if q["id"] == pid]
+    assert (
+        req["reply"]
+        == "Please send us the return slip for S-103 so we can match it to our records."
+    )
 
 
 def test_paid_elsewhere_on_paypal_is_a_recorded_mismatch(api, db, fake, copy):

@@ -78,6 +78,11 @@ def summary(
         money = usd(abs(amount_cents))
         if status == "DONE" and mode == "CREDIT":
             return f"Approved as {usd(credit_cents or abs(amount_cents))} credit on your account"
+        if status == "DONE" and mode == "SPLIT":
+            return (
+                f"Approved — {money} off {invoice_no or 'your invoice'} and "
+                f"{usd(credit_cents or 0)} credit on your account"
+            )
         if status in ("APPROVED", "DONE"):
             return f"Approved — {money} off {invoice_no or 'your invoice'}"
         return f"−{money} on {invoice_no or 'your invoice'} for {sku or 'an item'}"

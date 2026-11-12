@@ -21,7 +21,7 @@ from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import demo, imports, mirror, payments, proposals, reminders
+from backend.services import demo, imports, mirror, payments, proposals, reminders, sync
 from backend.services import supplier as svc
 
 router = APIRouter(prefix="/api/supplier")
@@ -86,14 +86,27 @@ def proposal_list(
 
 
 @router.get("/payments/{payment_id}")
-def payment(
+async def payment(
     payment_id: int,
     request: Request,
-    session: Annotated[Session, Depends(get_session)],
+    pp: Annotated[PayPal, Depends(get_paypal)],
     settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+    live: bool = False,
 ) -> Any:
+    """`?live=1` (P3b step 5, A4): first the scope check, then ask PayPal (≤ 5 s, one fetch
+    per payment at a time) and answer with what's stored after it."""
+
+    def detail() -> Any:
+        with session_factory() as s:
+            return svc.payment_detail(s, _scope(request, s, settings), payment_id)
+
     try:
-        return svc.payment_detail(session, _scope(request, session, settings), payment_id)
+        out = await run_in_threadpool(detail)
+        if live:
+            await sync.refresh_payment(session_factory, pp, payment_id)
+            out = await run_in_threadpool(detail)
+        return out
     except svc.ScopeError as e:
         return _error(e.status, e.code, e.message)
     except svc.NotFoundError:

@@ -90,6 +90,8 @@ Demo mode: the overview shows the visitor's own copy — **three real buyers** (
 
 Not yet on PayPal (P3 §M M9): the buyer row shows "Setting up on PayPal…" and still opens; the overview refetches every 2 s while any row is setting up, for at most 30 s, then those rows read "Couldn't set up on PayPal — open to retry" (danger colour).
 
+Proposal card additions (P3b step 5): an ADJUSTMENT's Edit offers a third choice, "Take $X off + credit the rest" (SPLIT); a RETURN_CHECK card has **Credit S-104** (files a deduction for the supplier to approve) and **Ask for the return slip**, beside the free reply; a PROMISE_NOTE card has a date field to correct the promised day; cards our own code made (the D23 note, a deduction from a return check) carry the badge "automatic". The payment page shows "· checking PayPal…" next to Split while it asks PayPal for the current status, then the fresh values (or the stored ones with "last synced").
+
 ### 4.3c Import `/supplier/import` (P3b B7, X3, X4)
 Heading "Import an ERP export"; one line on what happens + **Download the sample file** (three buyers, dated today). Fields: **Admin token** (password field, kept in memory only, never stored) and **CSV file (up to 1 MB)**; **Import** ("Importing… (up to 20 s)"). Result: "Imported" — created/updated counts, "N invoices put on PayPal, M still setting up", PayPal errors by invoice, then each buyer with its setup state and **Statement link**; or "Nothing imported" with "Row 4: …" per error. Wrong token → "That admin token isn't valid." Loads without a demo cookie (no redirect). The video shows it; the token on screen is rotated after recording.
 

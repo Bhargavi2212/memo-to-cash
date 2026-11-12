@@ -38,16 +38,71 @@ async def remind(pp: PayPal) -> int:
     for n in (1, 2, 3):
         rid = request_id(pp.settings, "rem", d.uid, n)
         try:
-            out, ms = await timed(pp.request("POST", f"/v2/invoicing/invoices/{inv_id}/remind",
-                                             json=remind_body(REMIND_NOTE), request_id=rid))
+            out, ms = await timed(
+                pp.request(
+                    "POST",
+                    f"/v2/invoicing/invoices/{inv_id}/remind",
+                    json=remind_body(REMIND_NOTE),
+                    request_id=rid,
+                )
+            )
             save(f"remind_ok_{n}", out or {"empty": True})
-            note(f"remind {n}", "accepted", f"{ms} ms; body keys={sorted(out) if out else '(empty)'}")
+            note(
+                f"remind {n}", "accepted", f"{ms} ms; body keys={sorted(out) if out else '(empty)'}"
+            )
         except PayPalError as e:
             save(f"remind_error_{n}", err_body(e))
             issues = [d.get("issue") for d in e.details]
             note(f"remind {n}", f"REFUSED {e.status} {e.name}", f"issues={issues}")
     got = await inv.get(pp, inv_id)
     note("after", f"status {got.get('status')}", "")
+    return 0
+
+
+async def split(pp: PayPal) -> int:
+    """G15: on a part-paid invoice, does a PUT that brings PayPal's due to exactly $0.00 work?"""
+    from backend.core.dates import today_ny
+
+    d = draft()  # $3,500.00: S-101 $2,350 + S-104 $1,150
+    body = await inv.create(pp, d)
+    inv_id = body["id"]
+    await inv.send(pp, inv_id, d.uid)
+    uid = str(uuid.uuid4())
+    await inv.record_payment(
+        pp,
+        inv_id,
+        allocation_uid=uid,
+        amount_cents=100000,
+        method="OTHER",
+        payment_date=today_ny(),
+        note=f"[MTC:{uid}] probe part payment",
+    )
+    got = await inv.get(pp, inv_id)
+    note("setup", f"part-paid: status {got.get('status')}", f"due {got['due_amount']['value']}")
+    try:
+        after, ms = await timed(
+            inv.put_adjustment(
+                pp,
+                inv_id,
+                proposal_uid=str(uuid.uuid4()),
+                sku="S-101",
+                amount_cents=-250000,
+                reason="probe: deduct the whole due",
+            )
+        )
+        save("split_put_to_zero", after)
+        note(
+            "PUT to $0.00",
+            f"ACCEPTED status {after.get('status')}",
+            f"due {after['due_amount']['value']}, total {after['amount']['value']}; {ms} ms",
+        )
+    except PayPalError as e:
+        save("split_put_to_zero_error", err_body(e))
+        note(
+            "PUT to $0.00",
+            f"REFUSED {e.status} {e.name}",
+            f"issues={[x.get('issue') for x in e.details]}",
+        )
     return 0
 
 
@@ -59,6 +114,8 @@ async def main() -> int:
     which = sys.argv[1] if len(sys.argv) > 1 else ""
     if which == "remind":
         code = await remind(pp)
+    elif which == "split":
+        code = await split(pp)
     else:
         print(__doc__)
         return 2
@@ -69,5 +126,4 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
-    _ = uuid  # (kept for future probes)
     raise SystemExit(asyncio.run(main()))

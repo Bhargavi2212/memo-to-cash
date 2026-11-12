@@ -32,7 +32,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.agent.facts import proposal_sku
 from backend.core.dates import today_ny
 from backend.core.money import to_cents
-from backend.db.models import Invoice, InvoiceLine, MemoLine, Proposal, ReminderSent
+from backend.db.models import Invoice, InvoiceLine, Memo, MemoLine, Proposal, ReminderSent
 from backend.paypal import invoices as pinv
 from backend.paypal.client import PayPal, PayPalError
 from backend.services import audit
@@ -149,8 +149,6 @@ def _apply(
         if p.status == "PENDING":
             if mode is not None and mode not in MODES:
                 raise ProposalError(422, "BAD_MODE", "mode must be APPLY, CREDIT or SPLIT")
-            if mode == "SPLIT":
-                raise ProposalError(422, "NOT_YET", "Deduct-and-credit comes in a later step")
             if edits:
                 _edit_adjustment(s, p, inv, sku, edits)
             amount = -int(p.payload["amount_cents"])  # stored negative (BACKEND_SCHEMA)
@@ -159,28 +157,58 @@ def _apply(
                 mode = "APPLY" if due >= amount else "CREDIT"
             if mode == "APPLY" and due < amount:
                 raise ProposalError(409, "NEEDS_CREDIT", NEEDS_CREDIT_MSG)
+            # SPLIT (P3b G15, proved: a PUT to due $0.00 on a part-paid invoice works): take
+            # what's still due off the invoice, credit the rest
+            deduct = min(due, amount) if mode == "SPLIT" else amount
+            if mode == "SPLIT" and deduct <= 0:
+                mode, deduct = "CREDIT", amount  # nothing left to deduct: all credit
+            elif mode == "SPLIT" and deduct == amount:
+                mode = "APPLY"  # it fits after all
             pl = dict(p.payload)
             pl.setdefault(
                 "original", {"amount_cents": pl["amount_cents"], "reason": pl.get("reason")}
             )
             pl["mode"] = mode
-            pl["credit_cents"] = amount if mode == "CREDIT" else 0
+            pl["credit_cents"] = {"CREDIT": amount, "SPLIT": amount - deduct}.get(mode, 0)
+            if mode == "SPLIT":
+                pl["amount_cents"] = -deduct  # the effective deduction (R1); original kept
             p.payload = pl  # effective values, before any PayPal call (R1)
             p.decided_at = now
             if mode == "CREDIT":
                 p.status = "DONE"
                 p.result = {**(p.result or {}), "mode": "CREDIT", "credit_cents": amount}
-                audit.log(s, "supplier", "proposal.credited", ref=str(p.id),
-                          detail={"invoice": inv.erp_invoice_no, "credit": amount})  # fmt: skip
+                audit.log(
+                    s,
+                    "supplier",
+                    "proposal.credited",
+                    ref=str(p.id),
+                    detail={"invoice": inv.erp_invoice_no, "credit": amount},
+                )
                 return snapshot(p), None
             # memo_line_id stays NULL: the unique indexes are for kept lines (BACKEND_SCHEMA)
-            s.add(InvoiceLine(invoice_id=inv.id, memo_line_id=None,
-                              name=f"Adjustment {sku}", amount_cents=-amount))  # fmt: skip
-            inv.total_cents -= amount
+            s.add(
+                InvoiceLine(
+                    invoice_id=inv.id,
+                    memo_line_id=None,
+                    name=f"Adjustment {sku}",
+                    amount_cents=-deduct,
+                )
+            )
+            inv.total_cents -= deduct
             inv.ledger_status = _ledger_status(inv)
             p.status = "APPROVED"
-            audit.log(s, "supplier", "proposal.approved", ref=str(p.id),
-                      detail={"invoice": inv.erp_invoice_no, "amount_cents": -amount})  # fmt: skip
+            audit.log(
+                s,
+                "supplier",
+                "proposal.approved",
+                ref=str(p.id),
+                detail={
+                    "invoice": inv.erp_invoice_no,
+                    "amount_cents": -deduct,
+                    "mode": mode,
+                    "credit_cents": pl["credit_cents"],
+                },
+            )
         # APPROVED (now, or left by a crash) / FAILED → the PayPal step (again), from the payload
         job = {
             "proposal_id": p.id,
@@ -273,12 +301,94 @@ def _finish_reminder(
         return snapshot(p)
 
 
+PROMISE_MAX_DAYS = 90
+
+
+def _promise_date(value: Any) -> str:
+    """A supplier-corrected promise date: ISO, after today (NY), at most 90 days out."""
+    from datetime import date, timedelta
+
+    try:
+        d = date.fromisoformat(str(value))
+    except ValueError as e:
+        raise ProposalError(422, "BAD_EDIT", "promise_date must be YYYY-MM-DD") from e
+    today = today_ny()
+    if not today < d <= today + timedelta(days=PROMISE_MAX_DAYS):
+        raise ProposalError(422, "BAD_EDIT", "The promised date must be in the next 90 days")
+    return d.isoformat()
+
+
+def _resolve_return_check(s: Session, p: Proposal, edits: dict[str, Any]) -> str:
+    """RETURN_CHECK (the buyer says they returned an item we have no record of):
+    - CREDIT_LINE: we accept it — a new PENDING ADJUSTMENT for the line's price on its invoice
+      (the supplier still approves the money, with the usual APPLY/CREDIT/SPLIT rules);
+    - ASK_FOR_SLIP: reply asking for the return slip; nothing else changes."""
+    unknown = set(edits) - {"resolution", "text"}
+    if unknown:
+        raise ProposalError(422, "BAD_EDIT", f"can't edit {sorted(unknown)} here")
+    sku = str(p.payload.get("sku") or "")
+    resolution = edits["resolution"]
+    if resolution == "ASK_FOR_SLIP":
+        p.result = {**(p.result or {}), "resolution": resolution}
+        return _reply_text(edits) or (
+            f"Please send us the return slip for {sku} so we can match it to our records."
+        )
+    if resolution != "CREDIT_LINE":
+        raise ProposalError(422, "BAD_EDIT", "resolution must be CREDIT_LINE or ASK_FOR_SLIP")
+    line = s.scalars(
+        select(MemoLine)
+        .join(Memo, MemoLine.memo_id == Memo.id)
+        .where(Memo.buyer_id == p.buyer_id, MemoLine.sku == sku)
+    ).first()
+    if line is None or line.status != "KEPT":
+        raise ProposalError(422, "NOT_KEPT", f"{sku} isn't on an invoice — nothing to credit")
+    il = s.scalars(select(InvoiceLine).where(InvoiceLine.memo_line_id == line.id)).first()
+    if il is None:
+        raise ProposalError(422, "NOT_KEPT", f"{sku} isn't on an invoice — nothing to credit")
+    inv = s.get(Invoice, il.invoice_id)
+    assert inv is not None
+    adj = Proposal(
+        buyer_id=p.buyer_id,
+        kind="ADJUSTMENT",
+        payload={
+            "invoice_id": inv.id,
+            "amount_cents": -line.price_cents,
+            "sku": sku,
+            "reason": f"Return of {sku} accepted (from a return check)",
+        },
+        evidence={
+            "source": "return_check",
+            "return_check_id": p.id,
+            "checks": [f"{sku} is KEPT on {inv.erp_invoice_no}", f"price {line.price_cents} cents"],
+            "records": [f"memo_line:{sku}", f"invoice:{inv.erp_invoice_no}"],
+        },
+    )
+    s.add(adj)
+    s.flush()
+    p.result = {**(p.result or {}), "resolution": resolution, "adjustment_proposal_id": adj.id}
+    return _reply_text(edits) or (
+        f"Thanks — we'll credit {sku}. Demo Diamond Co. will confirm the amount shortly."
+    )
+
+
 def _approve_other(s: Session, p: Proposal, edits: dict[str, Any], now: datetime) -> dict:
-    """A8 (P3a scope): REPLY / RETURN_CHECK / PROMISE_NOTE → DONE; reply text reaches the buyer."""
+    """A8: REPLY / RETURN_CHECK / PROMISE_NOTE → DONE; reply text reaches the buyer.
+    P3b step 5: PROMISE_NOTE takes `{promise_date}` (future, ≤ 90 days); RETURN_CHECK takes
+    `{resolution: CREDIT_LINE | ASK_FOR_SLIP, text?}` (BACKEND_SCHEMA §8)."""
     if p.kind == "PROMISE_NOTE":
-        if edits:
-            raise ProposalError(422, "NOT_YET", "Changing a promised date comes in a later step")
+        unknown = set(edits) - {"promise_date"}
+        if unknown:
+            raise ProposalError(422, "BAD_EDIT", f"can't edit {sorted(unknown)} here")
+        if "promise_date" in edits:
+            p.payload = {
+                **p.payload,
+                "promise_date": _promise_date(edits["promise_date"]),
+                "original": p.payload.get("original")
+                or {"promise_date": p.payload.get("promise_date")},
+            }
         reply = None
+    elif p.kind == "RETURN_CHECK" and edits.get("resolution"):
+        reply = _resolve_return_check(s, p, edits)
     elif p.kind in ("REPLY", "RETURN_CHECK"):
         unknown = set(edits) - {"text"}
         if unknown:
@@ -310,10 +420,16 @@ def _finish(
         if err is not None:
             p.status = "FAILED"
             p.result = {**old, "error": err.name, "debug_id": err.debug_id, "attempts": attempts}
-            audit.log(s, "paypal", "proposal.paypal_failed", ref=str(p.id),
-                      detail={"error": err.name, "debug_id": err.debug_id})  # fmt: skip
-            log.warning("adjustment PUT failed proposal=%s %s debug_id=%s", p.id, err.name,
-                        err.debug_id)  # fmt: skip
+            audit.log(
+                s,
+                "paypal",
+                "proposal.paypal_failed",
+                ref=str(p.id),
+                detail={"error": err.name, "debug_id": err.debug_id},
+            )
+            log.warning(
+                "adjustment PUT failed proposal=%s %s debug_id=%s", p.id, err.name, err.debug_id
+            )
             return snapshot(p)
         assert body is not None
         due = to_cents((body.get("due_amount") or {}).get("value", "0"))
@@ -323,10 +439,21 @@ def _finish(
         inv.paypal_synced_at = datetime.now(UTC)
         inv.mismatch = None if due == ours else f"PayPal due {due} ≠ ours {ours} (cents)"
         p.status = "DONE"
-        p.result = {**old, "paypal_due_cents": due, "paypal_status": body.get("status"),
-                    "attempts": attempts, "error": None, "debug_id": None}  # fmt: skip
-        audit.log(s, "paypal", "proposal.done", ref=str(p.id),
-                  detail={"paypal_due_cents": due, "mismatch": inv.mismatch})  # fmt: skip
+        p.result = {
+            **old,
+            "paypal_due_cents": due,
+            "paypal_status": body.get("status"),
+            "attempts": attempts,
+            "error": None,
+            "debug_id": None,
+        }
+        audit.log(
+            s,
+            "paypal",
+            "proposal.done",
+            ref=str(p.id),
+            detail={"paypal_due_cents": due, "mismatch": inv.mismatch},
+        )
         return snapshot(p)
 
 

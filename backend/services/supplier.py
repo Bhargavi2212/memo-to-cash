@@ -112,7 +112,10 @@ class ProposalCard(BaseModel):
 def _source(p: Proposal) -> str:
     if p.evidence.get("fallback") or "fallback_day" in p.payload:
         return "fallback"
-    return "seed" if p.evidence.get("source") == "seed" else "agent"
+    src = p.evidence.get("source")
+    if src in ("system", "return_check"):  # made by our code (D23 note, P3b return check)
+        return "system"
+    return "seed" if src == "seed" else "agent"
 
 
 def _reminder_state(session: Session, inv: Invoice, today: date) -> str | None:

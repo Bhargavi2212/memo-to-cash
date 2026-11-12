@@ -3,9 +3,9 @@
 // stored PayPal status + "last synced" time, and the timeline. The live PayPal fetch is P3b.
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, type PaymentDetail as PaymentDetailData } from "@/lib/api";
 import { longDate } from "@/lib/dates";
 import { paymentMethodLabel, paypalStatusLabel } from "@/lib/labels";
 import { formatCents } from "@/lib/money";
@@ -24,7 +24,23 @@ const ACTION: Record<string, string> = {
 export function PaymentDetail() {
   const { id } = useParams<{ id: string }>();
   const [reload] = useState(0);
-  const { data: d, error } = useSupplierData(() => api.supplier.payment(Number(id)), reload);
+  const { data: stored, error } = useSupplierData(() => api.supplier.payment(Number(id)), reload);
+  // P3b step 5 (A4): then ask PayPal for the current status (≤ 5 s server-side); until it
+  // answers — or if it can't — the stored values show with their "last synced" time
+  const [live, setLive] = useState<PaymentDetailData | null>(null);
+  const [checking, setChecking] = useState(true);
+  useEffect(() => {
+    let on = true;
+    api.supplier
+      .payment(Number(id), true)
+      .then((x) => on && setLive(x))
+      .catch(() => undefined)
+      .finally(() => on && setChecking(false));
+    return () => {
+      on = false;
+    };
+  }, [id]);
+  const d = live ?? stored;
   if (error) return <p role="alert">{error}</p>;
   if (!d) return <div aria-busy="true" className="h-48 animate-pulse rounded-card bg-line" />;
   const p = d.payment;
@@ -48,7 +64,8 @@ export function PaymentDetail() {
 
       <section aria-labelledby="split-h" className="rounded-card border border-line bg-surface">
         <h2 id="split-h" className="px-4 pt-4 text-lg font-semibold">
-          Split
+          Split{" "}
+          {checking && <span className="text-sm font-normal text-muted">· checking PayPal…</span>}
         </h2>
         <ul className="divide-y divide-line sm:hidden">
           {d.allocations.map((a) => (

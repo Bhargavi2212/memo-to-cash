@@ -1,0 +1,148 @@
+{
+  "amount": {
+    "breakdown": {
+      "discount": {
+        "invoice_discount": {
+          "amount": {
+            "currency_code": "USD",
+            "value": "0.00"
+          }
+        },
+        "item_discount": {
+          "currency_code": "USD",
+          "value": "0.00"
+        }
+      },
+      "item_total": {
+        "currency_code": "USD",
+        "value": "1000.00"
+      },
+      "tax_total": {
+        "currency_code": "USD",
+        "value": "0.00"
+      }
+    },
+    "currency_code": "USD",
+    "value": "1000.00"
+  },
+  "configuration": {
+    "allow_only_pay_by_bank": false,
+    "allow_tip": false,
+    "allow_vba_payments": false,
+    "partial_payment": {
+      "allow_partial_payment": true,
+      "minimum_amount_due": {
+        "currency_code": "USD",
+        "value": "1.00"
+      }
+    },
+    "save_item_for_future": true,
+    "tax_calculated_after_discount": false,
+    "tax_inclusive": false,
+    "template_id": "TEMP-6SA13879W6583252W"
+  },
+  "detail": {
+    "archived": false,
+    "category_code": "SHIPPABLE",
+    "currency_code": "USD",
+    "group_draft": false,
+    "invoice_date": "2026-09-24",
+    "invoice_number": "INV-9469-xrkf4x",
+    "memo": "Kept from memo M-201 \u00b7 ERP INV-9001",
+    "metadata": {
+      "caller_type": "API_V2_INVOICE",
+      "create_time": "2026-11-12T03:46:23Z",
+      "created_by_flow": "REGULAR_SINGLE",
+      "invoicer_view_url": "https://www.sandbox.paypal.com/invoice/details/INV2-9VYD-DR4B-TXEN-GCB2",
+      "last_update_time": "2026-11-12T03:46:28Z",
+      "recipient_view_url": "https://www.sandbox.paypal.com/invoice/p/REDACTED",
+      "spam_info": {}
+    },
+    "note": "See everything you owe and pay several invoices at once: http://localhost:3000/s/open-checks-token",
+    "payment_term": {
+      "due_date": "2026-10-24",
+      "term_type": "DUE_ON_DATE_SPECIFIED"
+    },
+    "reference": "M-201",
+    "viewed_by_recipient": false
+  },
+  "due_amount": {
+    "currency_code": "USD",
+    "value": "0.00"
+  },
+  "id": "INV2-9VYD-DR4B-TXEN-GCB2",
+  "invoicer": {
+    "business_name": "Demo Diamond Co.",
+    "email_address": "supplier@example.com"
+  },
+  "items": [
+    {
+      "description": "SKU S-101 \u00b7 memo M-201",
+      "id": "ITEM-7NP10532JR6571323",
+      "name": "S-101 Round 1.01ct (memo M-201)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "2350.00"
+      }
+    },
+    {
+      "description": "SKU S-104 \u00b7 memo M-201",
+      "id": "ITEM-9WS86519FF8177542",
+      "name": "S-104 Stud pair (memo M-201)",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "1150.00"
+      }
+    },
+    {
+      "description": "Approved by the supplier [MTC-ADJ:ed6edb6d-bede-4197-923a-39766ada08b0]",
+      "id": "ITEM-0X363056LW767420U",
+      "name": "Adjustment S-101: probe: deduct the whole due",
+      "quantity": "1",
+      "unit_amount": {
+        "currency_code": "USD",
+        "value": "-2500.00"
+      }
+    }
+  ],
+  "links": [
+    {
+      "href": "https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-9VYD-DR4B-TXEN-GCB2",
+      "method": "GET",
+      "rel": "self"
+    }
+  ],
+  "payments": {
+    "paid_amount": {
+      "currency_code": "USD",
+      "value": "1000.00"
+    },
+    "transactions": [
+      {
+        "amount": {
+          "currency_code": "USD",
+          "value": "1000.00"
+        },
+        "method": "OTHER",
+        "note": "[MTC:82c2f21a-893f-423e-98b2-67e8e7b563e7] probe part payment",
+        "payment_date": "2026-11-11",
+        "payment_date_time": "2026-11-11T00:00:00Z",
+        "payment_id": "EXTR-261318224E129222J",
+        "type": "EXTERNAL"
+      }
+    ]
+  },
+  "primary_recipients": [
+    {
+      "billing_info": {
+        "business_name": "Northside Jewelers",
+        "email_address": "buyer@example.com"
+      }
+    }
+  ],
+  "settings": {},
+  "status": "MARKED_AS_PAID",
+  "unilateral": false
+}
