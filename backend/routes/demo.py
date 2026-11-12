@@ -76,11 +76,10 @@ def demo_whoami(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> dict[str, str | None]:
-    """The statement token of the cookie's own demo copy (P3 A10, R10): the "See it as Demo
-    Diamond Co." link shows only on that copy's pages. No cookie / not demo mode → null."""
+) -> dict[str, Any]:
+    """The cookie's own demo copy (P3 A10, R10; P3 §M M4): Northside's statement token plus all
+    three buyers; the "See it as Demo Diamond Co." link shows only on that copy's statements.
+    No cookie / not demo mode → `{statement_token: null, buyers: []}`."""
     from backend.services import supplier
 
-    return {
-        "statement_token": supplier.whoami(session, settings, request.cookies.get(demo.COOKIE_NAME))
-    }
+    return supplier.whoami(session, settings, request.cookies.get(demo.COOKIE_NAME))

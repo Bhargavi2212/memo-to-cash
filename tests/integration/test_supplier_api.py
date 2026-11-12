@@ -186,11 +186,17 @@ def test_a_half_built_copy_is_invisible(clients, db):
 
 def test_whoami_returns_only_the_cookies_own_token(clients, db):
     a, b = clients
-    assert a.get("/api/demo/whoami").json() == {"statement_token": None}
+    assert a.get("/api/demo/whoami").json() == {"statement_token": None, "buyers": []}
     mine, theirs = start(a, "6.6.6.1"), start(b, "6.6.6.2")
-    assert a.get("/api/demo/whoami").json() == {"statement_token": mine["statement_token"]}
-    assert b.get("/api/demo/whoami").json() == {"statement_token": theirs["statement_token"]}
+    wa, wb = a.get("/api/demo/whoami").json(), b.get("/api/demo/whoami").json()
+    assert wa["statement_token"] == mine["statement_token"]  # Northside, the landing/back link
+    assert wb["statement_token"] == theirs["statement_token"]
     assert mine["statement_token"] != theirs["statement_token"]
+    # P3 §M M4: all three of the copy's buyers, each with its own token; none of the other copy's
+    assert [x["name"] for x in wa["buyers"]] == [
+        "Northside Jewelers", "Harbor Gems", "Lakeside Fine Jewelry"]  # Northside first # fmt: skip
+    assert len({x["statement_token"] for x in wa["buyers"]}) == 3
+    assert not {x["id"] for x in wa["buyers"]} & {x["id"] for x in wb["buyers"]}
 
 
 def test_supplier_reads_are_ledger_only(clients, db, fake):
@@ -202,3 +208,43 @@ def test_supplier_reads_are_ledger_only(clients, db, fake):
     a.get("/api/supplier/proposals")
     a.get(f"/api/supplier/buyers/{bid}")
     assert fake.ops() == before
+
+
+# ---------- phase M: three real buyers (P3 §M M3–M6) ----------
+
+
+def test_overview_lists_three_real_buyers_largest_owed_first(clients, db):
+    a, _ = clients
+    start(a, "8.1.1.1")
+    rows = a.get("/api/supplier/overview").json()["buyers"]
+    assert [(r["name"], r["owed_cents"], r["oldest_age_days"], r["past_due_cents"],
+             (r["out"], r["kept"], r["returned"]), r["paypal_setup"]) for r in rows] == [
+        ("Northside Jewelers", 842000, 48, 350000, (2, 5, 5), "READY"),
+        ("Lakeside Fine Jewelry", 596000, 31, 350000, (1, 4, 1), "READY"),
+        ("Harbor Gems", 230000, 12, 0, (1, 2, 2), "READY"),
+    ]  # fmt: skip
+
+
+def test_every_buyer_of_another_copy_is_404(clients, db):
+    a, b = clients
+    start(a, "8.1.1.2")
+    start(b, "8.1.1.3")
+    theirs = [x["id"] for x in b.get("/api/supplier/overview").json()["buyers"]]
+    assert len(theirs) == 3
+    for bid in theirs:
+        assert a.get(f"/api/supplier/buyers/{bid}").status_code == 404
+    mine = {x["id"] for x in a.get("/api/supplier/overview").json()["buyers"]}
+    assert len(mine) == 3 and not mine & set(theirs)
+    a.cookies.clear()
+    assert a.get("/api/supplier/overview", headers=AUTH).json()["buyers"] == []  # admin: no demos
+
+
+def test_each_buyer_page_has_its_own_statement_link(clients, db):
+    a, _ = clients
+    start(a, "8.1.1.4")
+    for row in a.get("/api/supplier/overview").json()["buyers"]:
+        d = a.get(f"/api/supplier/buyers/{row['id']}").json()
+        assert d["buyer"]["name"] == row["name"]
+        assert d["statement_url"].endswith(f"/s/{d['statement_token']}")
+        s = a.get(f"/api/statement/{d['statement_token']}").json()
+        assert s["buyer"]["name"] == row["name"] and s["owed_cents"] == row["owed_cents"]
