@@ -5,6 +5,7 @@
 import { useEffect, useId, useState } from "react";
 
 import { ApiError, api, type Preview, type RecordResult } from "@/lib/api";
+import { paymentMethodLabel } from "@/lib/labels";
 import { formatCents, parseDollars } from "@/lib/money";
 
 const METHODS = [
@@ -89,7 +90,7 @@ export function RecordPaymentModal({
         {done ? (
           <div className="mt-3 space-y-2 text-sm">
             <p>
-              Recorded {formatCents(done.amount_cents)} ({done.method.toLowerCase()}
+              Recorded {formatCents(done.amount_cents)} ({paymentMethodLabel("OFF_PAYPAL", done.method).toLowerCase()}
               {done.reference ? ` ${done.reference}` : ""}). It&apos;s being marked on each
               PayPal invoice:
             </p>
