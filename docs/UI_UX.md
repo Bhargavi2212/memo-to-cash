@@ -65,6 +65,7 @@
 - Answers show record chips (`Return R-311 · 38 days ago`) that scroll to the line.
 - "Something wrong? Tell Demo Diamond Co." → free text → message (becomes a proposal).
 - States: loading skeleton; all paid ("Nothing owed — thank you"); invalid link; PayPal error banner ("Payment didn't go through. You weren't charged.").
+- Paid on PayPal's own invoice page (P3b F3/F4, G15): coming back to the tab refetches the statement (not during a payment); Pay on an invoice PayPal shows paid → banner "INV-1038 was paid on PayPal — your statement is updated." and the statement reloads, nothing charged. The payment then shows in the payments list as paid on PayPal's invoice page.
 - Not yet on PayPal (P3 §M M9 — Harbor Gems / Lakeside Fine Jewelry for ~2 s after "Start the demo"): invoices shown; in place of the pay panel a note "Setting up on PayPal… Pay opens as soon as these invoices are on PayPal (a few seconds)." and a disabled **Pay with PayPal** button. Opening the page runs or joins the setup (waits ≤ 10 s) then reloads; still not ready → "Couldn't set up these invoices on PayPal." + **Retry** (refetch only on Retry).
 - **Notices** (from `Statement.notices`, shown as a banner above the total): `PAYMENT_VOIDED` → "A payment you started didn't go through — nothing was charged." · `PAYMENT_CREDITED` → "$X of your payment is kept as credit on your account." · `RECORDING_PENDING` → "Your payment is received; we're updating your invoices." Credit (if any) shows under the total as "Credit $X".
 

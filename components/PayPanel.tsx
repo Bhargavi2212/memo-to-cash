@@ -20,6 +20,7 @@ export function PayPanel({
   clientId,
   demoMode,
   onChanged,
+  onBusy,
 }: {
   token: string;
   statement: Statement;
@@ -27,6 +28,8 @@ export function PayPanel({
   clientId: string | null;
   demoMode: boolean;
   onChanged: (message: string) => void;
+  /** true from "start an order" until it ends (P3b X2: no statement refetch meanwhile) */
+  onBusy?: (busy: boolean) => void;
 }) {
   const router = useRouter();
   const demo = demoMode && statement.demo_login !== null;
@@ -95,6 +98,7 @@ export function PayPanel({
       router.push(`/s/${token}/receipt/${receipt.payment_id}`);
     } catch (e) {
       setFinishing(false);
+      onBusy?.(false);
       if (!(e instanceof ApiError)) return setBanner(GENERIC_FAIL);
       if (e.code === "PAYMENT_DECLINED" && actions) return actions.restart();
       if (e.code === "CAPTURE_UNCONFIRMED") return setUnconfirmed(orderId);
@@ -122,6 +126,7 @@ export function PayPanel({
             validRef.current ? actions.resolve() : actions.reject(),
           createOrder: async (data: { paymentSource?: string }) => {
             setBanner(null);
+            onBusy?.(true);
             try {
               const o = await api.order(token, {
                 ...requestRef.current,
@@ -129,14 +134,20 @@ export function PayPanel({
               });
               return o.paypal_order_id;
             } catch (e) {
-              setBanner(e instanceof ApiError ? e.message : GENERIC_FAIL);
+              onBusy?.(false);
+              // P3b F4: paid on PayPal's own page meanwhile → reload with the news, no charge
+              if (e instanceof ApiError && e.code === "PAID_ELSEWHERE") onChanged(e.message);
+              else setBanner(e instanceof ApiError ? e.message : GENERIC_FAIL);
               throw e;
             }
           },
           onApprove: (data: { orderID: string }, actions: { restart: () => unknown }) =>
             finish(data.orderID, actions),
-          onError: () => setBanner((b) => b ?? GENERIC_FAIL),
-          onCancel: () => undefined,
+          onError: () => {
+            onBusy?.(false);
+            setBanner((b) => b ?? GENERIC_FAIL);
+          },
+          onCancel: () => onBusy?.(false),
         });
         return buttons.render(containerRef.current);
       })

@@ -327,3 +327,191 @@ async def test_two_buyers_paid_at_once_dont_block_each_other(db, pp, fake, setti
     )
     assert [o.state for o in outs] == ["done", "done"]
     assert inv(db, "INV-1040", b["Lakeside Fine Jewelry"].id).paid_cents == 350000
+
+
+# ---------- 1c: the sweep (B4, G6, F8, G9) ----------
+
+
+def age(db, model, row_id, **deltas):
+    """Move a row's timestamps into the past (the sweep's fake clock)."""
+    now = datetime.now(UTC)
+    db.execute(
+        update(model)
+        .where(model.id == row_id)
+        .values(**{col: now - delta for col, delta in deltas.items()})
+    )
+    db.commit()
+
+
+async def test_sweep_processes_an_event_left_waiting(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    db.execute(
+        update(Allocation)
+        .where(Allocation.payment_id == o.payment_id)
+        .values(record_state="RECORDING")
+    )
+    db.commit()
+    i38 = inv(db, "INV-1038")
+    fake.pay_elsewhere(i38.paypal_invoice_id, 100000)
+    eid, first = await event(pp, settings, "INVOICING.INVOICE.PAID", paid_event(i38))
+    assert first == "recording"
+    db.execute(
+        update(Allocation)
+        .where(Allocation.payment_id == o.payment_id)
+        .values(record_state="PENDING")
+    )
+    db.commit()
+    await sync.sweep(SessionLocal, pp, settings)
+    ev = db.get(WebhookEvent, eid)
+    db.refresh(ev)
+    assert ev.processed_at is not None
+
+
+async def test_sweep_finishes_a_lost_capture_after_two_minutes(db, pp, fake, buyer, settings):
+    o, _cap = await lost_capture(pp, fake, buyer)
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "CREATED"  # < 2 min: left alone
+    age(db, Payment, o.payment_id, created_at=timedelta(minutes=3))
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "CAPTURED"
+    assert "order_capture" in fake.ops() and fake.ops().count("order_capture") == 1
+
+
+async def test_sweep_captures_an_approved_order_only_after_ten_minutes(
+    db, pp, fake, buyer, settings
+):
+    o = await order(pp, buyer)
+    fake.approve(o.paypal_order_id)
+    age(db, Payment, o.payment_id, created_at=timedelta(minutes=5))
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "CREATED" and "order_capture" not in fake.ops()
+    age(db, Payment, o.payment_id, created_at=timedelta(minutes=11))
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "CAPTURED"
+    assert fake.ops().count("order_capture") == 1
+
+
+async def test_sweep_voids_an_order_never_approved_after_three_hours(db, pp, fake, buyer, settings):
+    o = await order(pp, buyer)
+    age(db, Payment, o.payment_id, created_at=timedelta(hours=1))
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "CREATED"
+    age(db, Payment, o.payment_id, created_at=timedelta(hours=4))
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "VOIDED" and "order_capture" not in fake.ops()
+
+
+async def test_sweep_finishes_a_capture_paypal_was_holding(db, pp, fake, buyer, settings):
+    o = await order(pp, buyer)
+    fake.approve(o.paypal_order_id)
+    fake.capture_status = "PENDING"
+    await capture(pp, buyer, o.paypal_order_id)
+    assert payment(db, o.payment_id).status == "CAPTURE_PENDING"
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "CAPTURE_PENDING"  # PayPal still holds it
+    fake.orders[o.paypal_order_id]["purchase_units"][0]["payments"]["captures"][0]["status"] = (
+        "COMPLETED"
+    )
+    await sync.sweep(SessionLocal, pp, settings)
+    assert payment(db, o.payment_id).status == "CAPTURED"  # G6
+    assert db.scalar(select(func.count()).where(Allocation.payment_id == o.payment_id)) == 2
+
+
+async def test_sweep_resolves_a_stuck_recording(db, pp, fake, buyer, settings):
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    db.execute(
+        update(Allocation)
+        .where(Allocation.payment_id == o.payment_id)
+        .values(record_state="RECORDING", record_started_at=datetime.now(UTC))
+    )
+    db.commit()
+    await sync.sweep(SessionLocal, pp, settings)
+    assert {a.record_state for a in allocs(db, o.payment_id).values()} == {"RECORDING"}
+    for a in allocs(db, o.payment_id).values():
+        age(db, Allocation, a.id, record_started_at=timedelta(minutes=6))
+    await sync.sweep(SessionLocal, pp, settings)
+    assert {a.record_state for a in allocs(db, o.payment_id).values()} == {"RECORDED"}
+
+
+async def test_sweep_sets_up_draft_invoices_of_ready_buyers_only(db, pp, fake, settings):
+    real = import_csv(db, build_demo_csv(D, "judge@example.com"))  # real buyers, all DRAFT
+    abandoned = import_csv(db, build_demo_csv(D, "gone@example.com"), demo_session="old")
+    db.commit()
+    s = mirror_settings(settings)
+    pp2 = PayPal(s, transport=fake.transport())
+    await sync.sweep(SessionLocal, pp2, s)
+    db.expire_all()
+    mine = select(func.count()).where(Invoice.ledger_status == "DRAFT")
+    assert db.scalar(mine.where(Invoice.buyer_id.in_(real.buyer_ids))) == 0
+    assert db.scalar(mine.where(Invoice.buyer_id.in_(abandoned.buyer_ids))) == 7  # G9
+
+
+async def test_sweep_gives_up_on_an_invoice_after_five_attempts(db, pp, fake, settings):
+    res = import_csv(db, build_demo_csv(D, "judge@example.com"))
+    db.execute(
+        update(Invoice)
+        .where(Invoice.buyer_id.in_(res.buyer_ids))
+        .values(mirror_attempts=sync.MAX_MIRROR_ATTEMPTS)
+    )
+    db.commit()
+    s = mirror_settings(settings)
+    assert await sync.sweep(SessionLocal, PayPal(s, transport=fake.transport()), s) == 0
+    assert "create" not in fake.ops()
+
+
+async def test_a_second_sweep_finds_nothing(db, pp, fake, buyer, settings):
+    o, _cap = await lost_capture(pp, fake, buyer)
+    age(db, Payment, o.payment_id, created_at=timedelta(minutes=3))
+    assert await sync.sweep(SessionLocal, pp, settings) >= 1
+    assert await sync.sweep(SessionLocal, pp, settings) == 0
+
+
+# ---------- 1c: the pay-time check (F4) ----------
+
+
+async def test_pay_all_after_a_paypal_page_payment_is_refused_and_backfilled(
+    db, pp, fake, buyer, settings
+):
+    await paid_5000(db, pp, fake, buyer, settings)  # mirrors the invoices; INV-1042 has $2,000
+    i42 = inv(db, "INV-1042")
+    fake.pay_elsewhere(i42.paypal_invoice_id, 200000)  # buyer pays the rest on PayPal's page
+    orders_before = fake.ops().count("order_create")
+    paid = await sync.pay_check(SessionLocal, pp, buyer.statement_token, None, None)
+    assert paid == ["INV-1042"]
+    assert fake.ops().count("order_create") == orders_before  # no order: nothing charged twice
+    assert inv(db, "INV-1042").paid_cents == 350000 and ledger_ok(db, "INV-1042")
+    via = db.scalars(select(AuditLog.detail).where(AuditLog.action == "sync.backfill")).one()
+    assert via["via"] == "pay_check"  # X7
+    assert await sync.pay_check(SessionLocal, pp, buyer.statement_token, None, None) == []
+
+
+async def test_the_pay_check_gives_up_quietly_when_paypal_is_slow(
+    db, pp, fake, buyer, settings, monkeypatch
+):
+    await paid_5000(db, pp, fake, buyer, settings)
+    monkeypatch.setattr(sync, "PAY_CHECK_S", 0.2)
+    fake.delay["get"] = 1.0
+    assert await sync.pay_check(SessionLocal, pp, buyer.statement_token, None, None) == []
+
+
+async def test_the_order_route_answers_409_paid_elsewhere(db, pp, fake, buyer, settings):
+    from fastapi.testclient import TestClient
+
+    from backend.core.config import get_settings
+    from backend.main import app
+    from backend.paypal.client import get_paypal
+
+    await paid_5000(db, pp, fake, buyer, settings)
+    fake.pay_elsewhere(inv(db, "INV-1042").paypal_invoice_id, 200000)
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_paypal] = lambda: pp
+    try:
+        with TestClient(app) as c:
+            r = c.post(f"/api/statement/{buyer.statement_token}/order", json={})
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 409
+    assert r.json()["error"] == {
+        "code": "PAID_ELSEWHERE",
+        "message": "INV-1042 was paid on PayPal — your statement is updated.",
+    }

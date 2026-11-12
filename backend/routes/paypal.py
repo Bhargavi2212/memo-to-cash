@@ -72,5 +72,5 @@ async def paypal_webhook(
         return _error(400, "NOT_VERIFIED", "Signature not verified")
     row_id = await run_in_threadpool(sync.store_event, session_factory, event)
     if row_id is not None:  # 200 first; processing runs after the response (B1)
-        background.add_task(sync.process_event, session_factory, pp, settings, row_id)
+        background.add_task(sync.process_then_sweep, session_factory, pp, settings, row_id)
     return {"ok": True}

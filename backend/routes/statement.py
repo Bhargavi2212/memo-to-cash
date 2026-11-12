@@ -20,7 +20,7 @@ from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import agent, mirror, payments
+from backend.services import agent, mirror, payments, sync
 from backend.services import statement as svc
 
 router = APIRouter(prefix="/api")
@@ -84,6 +84,13 @@ def _pay_error(e: payments.PaymentError) -> JSONResponse:
     return JSONResponse({"error": err}, status_code=e.status)
 
 
+def paid_elsewhere_message(invoice_nos: list[str]) -> str:
+    """UI_UX §4.1 (P3b G15): one line, then the statement reloads."""
+    names = " and ".join(invoice_nos)
+    verb = "was" if len(invoice_nos) == 1 else "were"
+    return f"{names} {verb} paid on PayPal — your statement is updated."
+
+
 @router.post("/statement/{token}/order", response_model=OrderOut)
 async def create_order(
     token: str,
@@ -92,6 +99,10 @@ async def create_order(
     session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
 ):
     try:
+        # F4: an invoice paid on PayPal's own page meanwhile is taken in now, not charged again
+        paid = await sync.pay_check(session_factory, pp, token, body.invoice_ids, body.amount_cents)
+        if paid:
+            return _error(409, "PAID_ELSEWHERE", paid_elsewhere_message(paid))
         o = await payments.create_order(
             session_factory, pp, token, body.invoice_ids, body.amount_cents, body.funding_source
         )

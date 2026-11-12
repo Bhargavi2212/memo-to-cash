@@ -2,7 +2,7 @@
 // Buyer statement (FR-3, UI_UX §4.1). Reads the token with useParams() inside the page's
 // <Suspense> (P2 R6). Data comes only from our ledger API (no PayPal on page load).
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError, api, type PublicConfig, type Statement as StatementData } from "@/lib/api";
 import { formatCents } from "@/lib/money";
@@ -40,6 +40,27 @@ export function Statement() {
   const [changed, setChanged] = useState<string | null>(null);
   const [reload, setReload] = useState(0); // bump to refetch ("Try again", statement changed)
   const [focus, setFocus] = useState<string | null>(null); // record chip target (P4 D14)
+  const payBusy = useRef(false); // a payment is in progress (P3b X2)
+
+  // P3b F3: back on this tab (e.g. after paying on PayPal's own invoice page) → one fresh GET of
+  // the statement. Never while a payment is in progress (X2); the buyer's selection is kept, and
+  // the PayPanel only remounts if a balance actually changed (its key is the balances).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || payBusy.current) return;
+      api
+        .statement(token)
+        .then((fresh) => {
+          if (payBusy.current) return;
+          setLoad((prev) => (prev.kind === "ready" ? { ...prev, statement: fresh } : prev));
+          const open = new Set(fresh.invoices.filter((i) => i.due_cents > 0).map((i) => i.id));
+          setSelected((prev) => new Set([...prev].filter((id) => open.has(id))));
+        })
+        .catch(() => undefined); // a failed background refresh changes nothing
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [token]);
 
   // a record chip was clicked: scroll to it (the memo opens itself) and highlight it. Invoices
   // sit far above the Ask box, so the smooth scroll takes ~1–2 s: hold their highlight 4 s so
@@ -214,6 +235,9 @@ export function Statement() {
           onChanged={(message) => {
             setChanged(message);
             setReload((n) => n + 1);
+          }}
+          onBusy={(busy) => {
+            payBusy.current = busy;
           }}
         />
       )}

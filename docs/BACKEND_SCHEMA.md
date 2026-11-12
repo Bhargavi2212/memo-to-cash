@@ -189,7 +189,7 @@ Auth: **public** = statement token in path; **admin** = `Authorization: Bearer A
 | GET | `/health/deep` | admin | → `{db: bool, paypal_token: bool, llm: {ok, model, ms}}` (no secrets) |
 | GET | `/statement/{token}` | public | → `Statement` (§3) |
 | POST | `/statement/{token}/preview` | public | `{invoice_ids?: [], amount_cents?}` → `{allocations:[{invoice_no, amount_cents}], total_cents}` / 422 |
-| POST | `/statement/{token}/order` | public | same as preview → `{paypal_order_id}` |
+| POST | `/statement/{token}/order` | public | same as preview → `{paypal_order_id}`. First (P3b F4) GETs the PayPal invoices the split would touch (≤ 3 s in total, skipped on timeout): one paid on PayPal's own page meanwhile is backfilled and the order refused with **409 `PAID_ELSEWHERE`** "INV-1038 was paid on PayPal — your statement is updated."; not on PayPal yet → 409 `PAYPAL_NOT_READY` (P3 §M M9) |
 | POST | `/statement/{token}/capture` | public | `{paypal_order_id}` → `Receipt` |
 | POST | `/statement/{token}/ask` | public | `{question}` (1–500 chars) → `{answer, cited_records, looked_up, confidence, fallback, proposal_id?}` — always 200; a fallback answer files the day's REPLY (P4 D10, G1) |
 | POST | `/statement/{token}/message` | public | `{text}` (1–2000 chars) → `{received: true, label, summary, checks, proposal_id?, proposal_ids, answer?, fallback}` — `summary`/`checks` written by code (2-decimal money); always 200 (P4 D10) |

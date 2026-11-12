@@ -13,6 +13,7 @@ Every money write takes the buyer lock and re-checks inside it (invariant 9), so
 the sweep and the buyer's own requests can run at the same time without double counting (G10).
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Callable
@@ -258,6 +259,17 @@ async def reconcile_invoice(
     if busy:
         return Reconciled("recording")
     pp_inv = await pinv.get(pp, pp_id)
+    return await _reconcile_with(session_factory, pp, invoice_id, pp_inv, via=via)
+
+
+async def _reconcile_with(
+    session_factory: Callable[[], Session],
+    pp: PayPal,
+    invoice_id: int,
+    pp_inv: dict[str, Any],
+    *,
+    via: str,
+) -> Reconciled:
     out = await run_in_threadpool(_write_reconcile, session_factory, invoice_id, pp_inv, via)
     for payment_id in sorted(set(out.requeue)):
         await payments.record_allocations(session_factory, pp, payment_id)
@@ -484,3 +496,267 @@ async def process_event(
     )
     log.info("event processed id=%s type=%s result=%s", ev.paypal_event_id, t, result)
     return result
+
+
+# ---------------------------------------------------------------- pay-time check (F4)
+
+PAY_CHECK_S = 3.0  # total budget for the GETs before an order; on timeout carry on as before
+
+
+def _split_invoices(
+    session_factory: Callable[[], Session],
+    token: str,
+    invoice_ids: list[int] | None,
+    amount_cents: int | None,
+) -> list[tuple[int, str]]:
+    """(our invoice id, PayPal invoice id) of the invoices this payment would touch."""
+    from backend.core.split import resolve_request, split_payment
+    from backend.services.statement import find_buyer, open_invoices
+
+    with session_factory() as s:
+        buyer = find_buyer(s, token)
+        rows, open_ = open_invoices(s, buyer.id)
+        amount, selected = resolve_request(open_, invoice_ids, amount_cents)
+        touched = {i for i, _ in split_payment(amount, open_, selected)}
+        return [
+            (r.id, r.paypal_invoice_id) for r in rows if r.id in touched and r.paypal_invoice_id
+        ]
+
+
+async def pay_check(
+    session_factory: Callable[[], Session],
+    pp: PayPal,
+    token: str,
+    invoice_ids: list[int] | None,
+    amount_cents: int | None,
+) -> list[str]:
+    """Before Pay creates an order (F4): ask PayPal about the invoices it would pay. Any paid on
+    PayPal's own page meanwhile is backfilled now (via = pay_check) and its number returned —
+    the order is then refused with 409 PAID_ELSEWHERE so it isn't charged twice. PayPal slow
+    (> 3 s in total) or failing → [] and Pay goes on as before (D23 reconcile still covers it).
+    Split errors are left to `create_order`, which reports them as it always has."""
+    from backend.core.split import SplitError
+
+    try:
+        targets = await run_in_threadpool(
+            _split_invoices, session_factory, token, invoice_ids, amount_cents
+        )
+    except SplitError:
+        return []
+    if not targets:
+        return []
+
+    async def one(invoice_id: int, pp_id: str) -> str | None:
+        pp_inv = await pinv.get(pp, pp_id)
+        out = await _reconcile_with(session_factory, pp, invoice_id, pp_inv, via="pay_check")
+        return out.invoice_no if out.backfilled else None
+
+    try:
+        found = await asyncio.wait_for(
+            asyncio.gather(*(one(i, p) for i, p in targets)), timeout=PAY_CHECK_S
+        )
+    except (TimeoutError, PayPalError) as e:
+        log.info("pay check skipped: %s", type(e).__name__)
+        return []
+    return [n for n in found if n]
+
+
+# ---------------------------------------------------------------- the sweep (B4, G6, F8, G9)
+
+ORDER_STALE = timedelta(minutes=2)
+ORDER_EXPIRED = timedelta(hours=3)
+RECORDING_STUCK = timedelta(minutes=5)
+MAX_RECORD_ATTEMPTS = 5
+MAX_MIRROR_ATTEMPTS = 5
+EVENT_BATCH = 50
+
+
+@dataclass
+class SweepWork:
+    events: list[int] = field(default_factory=list)
+    created: list[int] = field(default_factory=list)  # payment ids, CREATED > 2 min
+    capture_pending: list[int] = field(default_factory=list)
+    recording: list[int] = field(default_factory=list)  # payment ids to resolve_recording
+    mirror: list[int] = field(default_factory=list)  # buyer ids with DRAFT invoices
+
+    def total(self) -> int:
+        parts = (self.events, self.created, self.capture_pending, self.recording, self.mirror)
+        return sum(len(p) for p in parts)
+
+
+def _find_work(session_factory: Callable[[], Session], now: datetime) -> SweepWork:
+    from backend.db.models import Buyer
+
+    w = SweepWork()
+    with session_factory() as s:
+        w.events = list(
+            s.scalars(
+                select(WebhookEvent.id)
+                .where(WebhookEvent.processed_at.is_(None))
+                .order_by(WebhookEvent.id)
+                .limit(EVENT_BATCH)
+            )
+        )
+        w.created = list(
+            s.scalars(
+                select(Payment.id).where(
+                    Payment.status == "CREATED",
+                    Payment.source == "STATEMENT",
+                    Payment.paypal_order_id.is_not(None),
+                    Payment.created_at < now - ORDER_STALE,
+                )
+            )
+        )
+        w.capture_pending = list(
+            s.scalars(
+                select(Payment.id).where(
+                    Payment.status == "CAPTURE_PENDING", Payment.paypal_order_id.is_not(None)
+                )
+            )
+        )
+        stuck = (Allocation.record_state == "RECORDING") & (
+            Allocation.record_started_at < now - RECORDING_STUCK
+        )
+        # B4's "FAILED transient ones" is empty by construction: a transient record error leaves
+        # the allocation RECORDING (payments._write_results); FAILED means PayPal said no for
+        # good (or D23, handled by reconcile) — retrying would only repeat it.
+        w.recording = sorted(
+            set(
+                s.scalars(
+                    select(Allocation.payment_id).where(
+                        stuck & (Allocation.attempts < MAX_RECORD_ATTEMPTS)
+                    )
+                )
+            )
+        )
+        ready = Buyer.is_demo.is_(False) | Buyer.demo_ready.is_(True)  # G9
+        w.mirror = sorted(
+            set(
+                s.scalars(
+                    select(Invoice.buyer_id)
+                    .join(Buyer, Invoice.buyer_id == Buyer.id)
+                    .where(
+                        Invoice.ledger_status == "DRAFT",
+                        Invoice.mirror_attempts < MAX_MIRROR_ATTEMPTS,
+                        ready,
+                    )
+                )
+            )
+        )
+    return w
+
+
+async def _finish_and_record(
+    session_factory: Callable[[], Session], pp: PayPal, payment_id: int, cap: dict[str, Any]
+) -> None:
+    status = await run_in_threadpool(_finish_from_capture, session_factory, payment_id, cap)
+    if status == "CAPTURED":
+        await payments.record_allocations(session_factory, pp, payment_id)
+
+
+async def _sweep_created(
+    session_factory: Callable[[], Session], pp: PayPal, payment_id: int, now: datetime
+) -> None:
+    """TRD §6b-2: GET the order — COMPLETED → finish; APPROVED → server capture (X1: ≥ 10 min);
+    older than 3 h and still not captured, or unknown to PayPal → VOIDED."""
+    from backend.paypal import orders
+
+    def load() -> tuple[str | None, datetime]:
+        with session_factory() as s:
+            p = s.get(Payment, payment_id)
+            assert p is not None
+            return p.paypal_order_id, p.created_at
+
+    order_id, created = await run_in_threadpool(load)
+    assert order_id
+    order: dict[str, Any] | None
+    try:
+        order = await orders.get(pp, order_id)
+    except PayPalError as e:
+        if e.transient:
+            return
+        order = None  # not found / expired
+    status = (order or {}).get("status")
+    if status == "COMPLETED" and order is not None:
+        await _finish_and_record(session_factory, pp, payment_id, orders.first_capture(order) or {})
+    elif status == "APPROVED":
+        await server_capture(session_factory, pp, payment_id, now)
+    elif now - created > ORDER_EXPIRED:
+        await run_in_threadpool(payments._void, session_factory, payment_id)
+
+
+async def _sweep_capture_pending(
+    session_factory: Callable[[], Session], pp: PayPal, payment_id: int
+) -> None:
+    """G6: PayPal held the capture (PENDING) and the COMPLETED webhook never came."""
+    from backend.paypal import orders
+
+    def load() -> str | None:
+        with session_factory() as s:
+            p = s.get(Payment, payment_id)
+            return p.paypal_order_id if p else None
+
+    order_id = await run_in_threadpool(load)
+    if not order_id:
+        return
+    try:
+        order = await orders.get(pp, order_id)
+    except PayPalError:
+        return
+    cap = orders.first_capture(order) or {}
+    if cap.get("status") == "COMPLETED":
+        await _finish_and_record(session_factory, pp, payment_id, cap)
+
+
+async def sweep(
+    session_factory: Callable[[], Session],
+    pp: PayPal,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """All pending PayPal work, one function (TRD §6b-4; B4 + G6 + F8): unprocessed webhook
+    events · CREATED payments > 2 min · CAPTURE_PENDING payments · RECORDING allocations stuck
+    > 5 min · DRAFT invoices of real or ready demo buyers (phase M setup
+    path, ≤ 5 attempts). Each item in its own transaction(s); an error is logged and left for
+    the next run. Returns how many items it looked at (the worker's "did work" signal)."""
+    from backend.services import mirror
+
+    when = now or datetime.now(UTC)
+    w = await run_in_threadpool(_find_work, session_factory, when)
+    for i in w.events:
+        await _safely("event", i, process_event(session_factory, pp, settings, i, now=when))
+    for i in w.created:
+        await _safely("created", i, _sweep_created(session_factory, pp, i, when))
+    for i in w.capture_pending:
+        await _safely("capture_pending", i, _sweep_capture_pending(session_factory, pp, i))
+    for i in w.recording:
+        await _safely("recording", i, payments.resolve_recording(session_factory, pp, i))
+    for i in w.mirror:
+        await _safely("mirror", i, mirror.ensure_setup(i, pp, settings, session_factory))
+    if w.total():
+        log.info(
+            "sweep: %d events, %d created, %d capture_pending, %d recording, %d mirror",
+            len(w.events),
+            len(w.created),
+            len(w.capture_pending),
+            len(w.recording),
+            len(w.mirror),
+        )
+    return w.total()
+
+
+async def _safely(kind: str, item: int, work: Any) -> None:
+    try:
+        await work
+    except Exception:  # one bad item never stops the rest; it's retried next run
+        log.exception("sweep %s %s failed", kind, item)
+
+
+async def process_then_sweep(
+    session_factory: Callable[[], Session], pp: PayPal, settings: Settings, event_id: int
+) -> None:
+    """The webhook's BackgroundTask (B1, TRD §6b-4(a)): this event, then the sweep — which only
+    queries unless something is stale — so a sleeping worker never delays the catch-up."""
+    await process_event(session_factory, pp, settings, event_id)
+    await sweep(session_factory, pp, settings)

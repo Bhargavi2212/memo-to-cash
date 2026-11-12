@@ -106,7 +106,7 @@ Other labels: RETURN_CLAIM → RETURN_CHECK proposal with evidence MATCH / NO_RE
 1. PayPal sends `INVOICING.INVOICE.PAID` → `/paypal/webhook`. (`PAYMENT.CAPTURE.COMPLETED` for a statement order → lost-capture recovery, TRD §6b-2.)
 2. Verify signature → store event (unique id) → 200.
 3. Process exactly per **TRD §6b**: if the invoice has an allocation in `RECORDING`, leave the event for the sweep; otherwise GET the invoice → list `payments.transactions` → a transaction is ours if it matches `allocations.paypal_transaction_id` **or** its note has the exact token `[MTC:<allocation uid>]` → only unmatched ones become new payments (source `PAYPAL_INVOICE_PAGE`) → update `paid_cents`, status.
-4. Statement and supplier view reflect it on next load.
+4. Statement and supplier view reflect it: an open statement refetches when its tab becomes visible again (P3b F3 — e.g. coming back from PayPal's page; never during a payment), and Pay refuses an order for an invoice PayPal shows paid meanwhile (409 `PAID_ELSEWHERE`, F4) — even if the webhook hasn't arrived yet. The api log line `sync.backfill … via=webhook|pay_check|sweep` says which path took it in (X7).
 
 ## 7. Journey J7 — Reminder
 1. Once a day the background worker (09:00 America/New_York) → find invoices past due with no promise → agent drafts `ReminderDraft` → proposal REMINDER.

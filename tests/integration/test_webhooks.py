@@ -157,7 +157,7 @@ def test_processing_is_handed_off_with_the_stored_row(api, db, fake, monkeypatch
     async def record(_sf, _pp, _settings, row_id, **_k):
         seen.append(row_id)
 
-    monkeypatch.setattr(sync, "process_event", record)
+    monkeypatch.setattr(sync, "process_then_sweep", record)
     assert post(api).status_code == 200
     assert seen == [db.scalars(select(WebhookEvent.id)).one()]
     assert post(api).status_code == 200 and len(seen) == 1  # redelivery: not handed off again
