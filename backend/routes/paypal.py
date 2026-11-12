@@ -5,7 +5,8 @@ and raw body arrive untouched. HTTP only — verification is in `paypal/webhooks
 processing in `services/sync.py`.
   no PAYPAL_WEBHOOK_ID → 503 NOT_CONFIGURED · not an event / missing headers → 400 (PayPal not
   asked) · signature FAILURE → 400, not stored · PayPal's verify unreachable → 503 (PayPal
-  retries) · verified → stored once → 200.
+  retries) · verified → stored once → 200 → processed in a BackgroundTask (a redelivery of an
+  event we already have isn't processed again here; the sweep retries unprocessed ones).
 """
 
 import json
@@ -13,7 +14,7 @@ import logging
 from collections.abc import Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -44,6 +45,7 @@ def _event(raw: bytes) -> dict[str, Any] | None:
 @router.post("/paypal/webhook")
 async def paypal_webhook(
     request: Request,
+    background: BackgroundTasks,
     settings: Annotated[Settings, Depends(get_settings)],
     pp: Annotated[PayPal, Depends(get_paypal)],
     session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
@@ -68,5 +70,7 @@ async def paypal_webhook(
             "webhook signature not verified id=%s type=%s", event["id"], event["event_type"]
         )
         return _error(400, "NOT_VERIFIED", "Signature not verified")
-    await run_in_threadpool(sync.store_event, session_factory, event)
+    row_id = await run_in_threadpool(sync.store_event, session_factory, event)
+    if row_id is not None:  # 200 first; processing runs after the response (B1)
+        background.add_task(sync.process_event, session_factory, pp, settings, row_id)
     return {"ok": True}

@@ -135,3 +135,29 @@ def test_a_body_that_isnt_an_event_is_400(api, db, fake):
     assert post(api, b'{"no": "id"}').status_code == 400
     assert post(api, b"not json").status_code == 400
     assert stored(db) == 0
+
+
+# ---------- 1b: the route hands verified events to processing ----------
+
+
+def test_a_stored_event_is_processed_after_the_response(api, db, fake):
+    assert post(api).status_code == 200  # TestClient runs the BackgroundTask before returning
+    ev = db.scalars(select(WebhookEvent)).one()
+    db.refresh(ev)
+    assert ev.processed_at is not None and ev.error == "ignored: unknown"  # G16: not ours
+
+
+def test_processing_is_handed_off_with_the_stored_row(api, db, fake, monkeypatch):
+    """Processing runs as a Starlette BackgroundTask (after the response is sent — Starlette's
+    guarantee; TestClient itself waits for it, so ordering isn't observable here)."""
+    from backend.services import sync
+
+    seen: list[int] = []
+
+    async def record(_sf, _pp, _settings, row_id, **_k):
+        seen.append(row_id)
+
+    monkeypatch.setattr(sync, "process_event", record)
+    assert post(api).status_code == 200
+    assert seen == [db.scalars(select(WebhookEvent.id)).one()]
+    assert post(api).status_code == 200 and len(seen) == 1  # redelivery: not handed off again

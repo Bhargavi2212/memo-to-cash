@@ -332,7 +332,22 @@ async def capture_payment(
     payment_id, status, uid, attempts, buyer_id = await run_in_threadpool(lookup)
     if status != "CREATED":
         return await run_in_threadpool(_settled_by_id, session_factory, payment_id)
+    return await capture_core(session_factory, pp, payment_id, order_id, uid, attempts, buyer_id)
 
+
+async def capture_core(
+    session_factory: Callable[[], Session],
+    pp: PayPal,
+    payment_id: int,
+    order_id: str,
+    uid: str,
+    attempts: int,
+    buyer_id: int,
+) -> CaptureResult:
+    """Lock → re-check → split check → capture (10 s) → finish, one transaction (CLAUDE §6's
+    one exception). Shared by the buyer's `/capture` and the server-side capture (webhook
+    ORDER.APPROVED / sweep, P3b B3 + X1), so both meet the same re-check: whichever comes
+    second finds the payment settled (or PayPal says ORDER_ALREADY_CAPTURED → finish)."""
     await pp.ensure_token()  # R7: never fetch a token while holding the lock
 
     session = session_factory()
