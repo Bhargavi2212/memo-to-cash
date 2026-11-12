@@ -65,6 +65,7 @@
 - Answers show record chips (`Return R-311 · 38 days ago`) that scroll to the line.
 - "Something wrong? Tell Demo Diamond Co." → free text → message (becomes a proposal).
 - States: loading skeleton; all paid ("Nothing owed — thank you"); invalid link; PayPal error banner ("Payment didn't go through. You weren't charged.").
+- Not yet on PayPal (P3 §M M9 — Harbor Gems / Lakeside Fine Jewelry for ~2 s after "Start the demo"): invoices shown; in place of the pay panel a note "Setting up on PayPal… Pay opens as soon as these invoices are on PayPal (a few seconds)." and a disabled **Pay with PayPal** button. Opening the page runs or joins the setup (waits ≤ 10 s) then reloads; still not ready → "Couldn't set up these invoices on PayPal." + **Retry** (refetch only on Retry).
 - **Notices** (from `Statement.notices`, shown as a banner above the total): `PAYMENT_VOIDED` → "A payment you started didn't go through — nothing was charged." · `PAYMENT_CREDITED` → "$X of your payment is kept as credit on your account." · `RECORDING_PENDING` → "Your payment is received; we're updating your invoices." Credit (if any) shows under the total as "Credit $X".
 
 ### 4.2 Receipt
@@ -86,8 +87,10 @@ Amount, date, PayPal capture ID, list "INV-1038 $3,500 → paid in full", "INV-1
 ```
 Demo mode: the overview shows the visitor's own copy — **three real buyers** (Northside Jewelers, Lakeside Fine Jewelry, Harbor Gems; P3 §M), each with PayPal invoices, a buyer page and its own statement link. No sample rows. Buyers are ordered by owed, largest first, then name. Header uses **"Past due"** (any overdue), not ">30d".
 
+Not yet on PayPal (P3 §M M9): the buyer row shows "Setting up on PayPal…" and still opens; the overview refetches every 2 s while any row is setting up, for at most 30 s, then those rows read "Couldn't set up on PayPal — open to retry" (danger colour).
+
 ### 4.3b Supplier buyer detail `/supplier/buyers/[id]`
-Memos and lines (same grouping as the buyer sees), invoices with PayPal status, messages and proposals, payments. Buttons: **Copy statement link** · **Record payment** (modal: method Cheque/Wire/Other, reference, amount, optional invoices, split preview, Confirm).
+Memos and lines (same grouping as the buyer sees), invoices with PayPal status, messages and proposals, payments. Buttons: **Copy statement link** · **Record payment** (modal: method Cheque/Wire/Other, reference, amount, optional invoices, split preview, Confirm). Not yet on PayPal (M9): **Record payment** disabled + the same setup note / Retry as the statement. Empty lists read "No payments yet." / "No messages yet."
 
 ### 4.4 Payment detail
 Header: $5,000 · PayPal capture `4CN0…` · <date>. Table: invoice → amount → PayPal status (fetched) → link. Timeline: captured → split → recorded INV-1038 → recorded INV-1042 → webhook received.
