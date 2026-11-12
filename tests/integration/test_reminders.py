@@ -230,3 +230,16 @@ def test_buyer_page_shows_where_a_reminder_can_be_drafted(clients, db, writer):
     card = draft(a, invoice_id(a, "Northside Jewelers", "INV-1038")).json()
     assert card["summary"] == "Payment reminder for INV-1038" and card["invoice_no"] == "INV-1038"
     assert state()["INV-1038"] == "PENDING"
+
+
+def test_one_day_past_due_reads_singular(clients, db):
+    a, _ = clients
+    start(a, "9.1.2.3")
+    text = (
+        "Hello Lakeside Fine Jewelry, a friendly reminder that INV-1040 ($3,500.00) is 1 day "
+        "past due."
+    )
+    w = FakeLLM(triage=[SEED_TRIAGE], reminder=[draft_for(text)])
+    app.dependency_overrides[llm.get_job_client] = lambda: w
+    card = draft(a, invoice_id(a, "Lakeside Fine Jewelry", "INV-1040")).json()
+    assert "INV-1040 is 1 day past due" in card["checks"]  # not "1 days"

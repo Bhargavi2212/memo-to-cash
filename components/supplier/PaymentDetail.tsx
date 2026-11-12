@@ -57,6 +57,8 @@ export function PaymentDetail() {
           {longDate(p.received_at)} ·{" "}
           {p.source === "OFF_PAYPAL"
             ? `${paymentMethodLabel(p.source, p.method)}${p.reference ? ` ${p.reference}` : ""}`
+            : p.source === "PAYPAL_INVOICE_PAGE"
+              ? `${paymentMethodLabel(p.source, p.method)} · PayPal transaction ${p.reference ?? "—"}`
             : `PayPal capture ${p.paypal_capture_id ?? "—"}`}
           {p.unapplied_cents > 0 && ` · ${formatCents(p.unapplied_cents)} kept as credit`}
         </p>
