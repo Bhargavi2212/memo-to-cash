@@ -9,7 +9,7 @@
 
 ## Why I built this
 
-Jewelry and diamond suppliers send goods to retailers **on memo**: on consignment, for one to three months. The retailer keeps some pieces and sends the rest back. Weeks later an invoice arrives for the pieces they kept.
+In B2B trade of physical goods, buyers rarely owe one invoice. They owe many: partial shipments, goods on consignment, returns, credits, deductions. The hardest version is goods sent **on memo** (on consignment): the buyer keeps some pieces, returns the rest, and weeks later is invoiced only for what they kept. **Jewelry is the demo domain** because memo is everyday trade there, but nothing in the product is jewelry-specific: memos, lines, returns and invoices work the same for any physical goods.
 
 Then the retailer has to work it out by hand. *Which memo is this invoice for? Did they credit what I returned? What do I owe across all these invoices?* Only then do they write a cheque. Meanwhile the supplier's accountant chases them by email and phone, then matches whatever money arrives back to invoices.
 
