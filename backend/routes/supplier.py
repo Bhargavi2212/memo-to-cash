@@ -9,8 +9,8 @@ from collections.abc import Callable
 from datetime import date
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, StrictInt
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -21,7 +21,7 @@ from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import demo, mirror, payments, proposals, reminders
+from backend.services import demo, imports, mirror, payments, proposals, reminders
 from backend.services import supplier as svc
 
 router = APIRouter(prefix="/api/supplier")
@@ -255,3 +255,45 @@ async def draft_reminder(
         from backend.db.models import Proposal
 
         return svc.cards(s, [s.get(Proposal, proposal_id)])[0]
+
+
+@router.get("/import/sample.csv")
+def import_sample() -> Response:
+    """The three-buyer sample file, built now with today's dates (P3b G6). Public: demo data,
+    no secrets."""
+    return Response(
+        imports.sample_csv(today_ny()),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="sample_export.csv"'},
+    )
+
+
+@router.post("/import")
+async def import_file(
+    file: UploadFile,
+    request: Request,
+    pp: Annotated[PayPal, Depends(get_paypal)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+) -> Any:
+    """FR-1 / P3b B7: admin only (a demo cookie can't import → 404, F7). CSV ≤ 1 MB."""
+
+    def admin_only() -> None:
+        with session_factory() as s:
+            if _scope(request, s, settings).buyer_ids is not None:
+                raise svc.NotFoundError
+
+    try:
+        await run_in_threadpool(admin_only)
+    except svc.ScopeError as e:
+        return _error(e.status, e.code, e.message)
+    except svc.NotFoundError:
+        return _error(404, *NOT_FOUND)
+    raw = await file.read(imports.MAX_BYTES + 1)
+    if len(raw) > imports.MAX_BYTES:
+        return _error(413, "FILE_TOO_LARGE", "The file is over 1 MB")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _error(422, "BAD_FILE", "The file isn't UTF-8 text (CSV)")
+    return await imports.run_import(session_factory, pp, settings, text)

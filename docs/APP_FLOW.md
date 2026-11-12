@@ -100,7 +100,7 @@ Other labels: RETURN_CLAIM → RETURN_CHECK proposal with evidence MATCH / NO_RE
 1. Upload CSV → validate every row first; a file with **any** invalid row writes nothing and returns all errors with row numbers.
 2. Upsert buyers, memos, lines, returns, invoices.
 3. For each invoice without `paypal_invoice_id`: create + send on PayPal (`PayPal-Request-Id` = `<env>-inv-<invoice uid>`) → store id + payer URL; on retry search by number first (P1 D4); a failure stores `mirror_error` and increments `mirror_attempts`.
-4. Summary: `{created, updated, errors, mirrored, mirror_errors}` (BACKEND_SCHEMA §2). Endpoint and screen are built in P3; the importer service in P1.
+4. Summary: `{created, updated, errors, mirrored, mirror_errors, setting_up, buyers}` (BACKEND_SCHEMA §2) — step 3 runs through phase M's per-buyer setup and the request waits at most 20 s; anything slower finishes in the background (the buyer shows "Setting up on PayPal…" until then). Each buyer is listed with its statement link. Page `/supplier/import`: admin token in a password field, memory only; judges have no token, so the video shows it (P3b F7, X3).
 
 ## 6. Journey J6 — Buyer pays one invoice directly on PayPal's page
 1. PayPal sends `INVOICING.INVOICE.PAID` → `/paypal/webhook`. (`PAYMENT.CAPTURE.COMPLETED` for a statement order → lost-capture recovery, TRD §6b-2.)
