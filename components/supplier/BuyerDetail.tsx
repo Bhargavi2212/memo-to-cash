@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { longDate } from "@/lib/dates";
 import { paymentMethodLabel, paypalStatusLabel } from "@/lib/labels";
 import { formatCents } from "@/lib/money";
@@ -24,6 +24,8 @@ export function BuyerDetail() {
   const { data: d, error } = useSupplierData(() => api.supplier.buyer(Number(id)), reload);
   const [copied, setCopied] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [drafting, setDrafting] = useState<number | null>(null); // invoice id (P3b B6)
+  const [draftError, setDraftError] = useState<{ id: number; message: string } | null>(null);
   // null until known: the banner must not appear after the page and push buttons down
   const [demo, setDemo] = useState<boolean | null>(null);
   useEffect(() => {
@@ -129,7 +131,38 @@ export function BuyerDetail() {
                     View on PayPal
                   </a>
                 )}
+                {i.reminder === "AVAILABLE" && (
+                  <button
+                    type="button"
+                    disabled={drafting !== null}
+                    onClick={() => {
+                      setDrafting(i.id);
+                      setDraftError(null);
+                      api.supplier
+                        .draftReminder(i.id)
+                        .then(() => refresh())
+                        .catch((e: unknown) =>
+                          setDraftError({
+                            id: i.id,
+                            message: e instanceof ApiError ? e.message : "Couldn't draft a reminder — try again.",
+                          }),
+                        )
+                        .finally(() => setDrafting(null));
+                    }}
+                    className="min-h-11 rounded-card border border-accent px-3 text-accent disabled:opacity-50"
+                  >
+                    {drafting === i.id ? "Drafting…" : "Draft a reminder"}
+                  </button>
+                )}
+                {i.reminder === "PENDING" && (
+                  <span className="text-xs text-muted">Reminder waiting for your decision</span>
+                )}
               </span>
+              {draftError?.id === i.id && (
+                <p role="alert" className="w-full text-sm text-danger">
+                  {draftError.message}
+                </p>
+              )}
             </li>
           ))}
         </ul>

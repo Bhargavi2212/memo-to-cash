@@ -110,7 +110,8 @@ Other labels: RETURN_CLAIM → RETURN_CHECK proposal with evidence MATCH / NO_RE
 
 ## 7. Journey J7 — Reminder
 1. Once a day the background worker (09:00 America/New_York) → find invoices past due with no promise → agent drafts `ReminderDraft` → proposal REMINDER.
-2. Supplier approves → check `reminders_sent` (< 2 today) → `POST /invoices/{id}/remind` → PayPal emails the buyer → audit.
+2. Supplier approves (may edit the text) → check `reminders_sent` (< 2 today, NY — PayPal's limit, which the sandbox doesn't enforce, so we do) → `POST /invoices/{id}/remind` → PayPal emails the buyer → audit.
+3. Demo copies have no daily run: the buyer page shows **"Draft a reminder"** on each past-due invoice without an active promise (Northside INV-1038, Lakeside INV-1040) — same drafting code (P3b B6, F9, F10). A draft that states anything not in the records is thrown away ("Couldn't draft a reminder — try again").
 
 ## 7b. Journey J8 — Supplier records a cheque
 1. Supplier opens buyer → "Record payment" → method (Cheque/Wire/Other), reference (cheque no.), amount, optional invoices.

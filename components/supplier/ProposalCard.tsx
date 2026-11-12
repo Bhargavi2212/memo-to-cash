@@ -25,6 +25,7 @@ function approveLabel(c: Card): string {
   }
   if (c.kind === "PROMISE_NOTE") return "Noted";
   if (c.kind === "REPLY") return "Send reply";
+  if (c.kind === "REMINDER") return "Send reminder on PayPal";
   return "Reply";
 }
 
@@ -40,7 +41,9 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
     card.payload.amount_cents ? (Math.abs(card.payload.amount_cents) / 100).toFixed(2) : "",
   );
   const [mode, setMode] = useState<"APPLY" | "CREDIT" | null>(null);
-  const [text, setText] = useState("");
+  const isReminder = card.kind === "REMINDER";
+  const draftText = typeof card.payload.text === "string" ? card.payload.text : "";
+  const [text, setText] = useState(isReminder ? draftText : "");
 
   const isAdj = card.kind === "ADJUSTMENT";
   const needsText = card.kind === "REPLY" || card.kind === "RETURN_CHECK";
@@ -67,6 +70,10 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
       if (mode) body.mode = mode;
     }
     if (needsText && text.trim()) body.edits = { text: text.trim() };
+    if (isReminder && text.trim() !== draftText) {
+      if (!text.trim()) return setError("Write the reminder, or reject it");
+      body.edits = { text: text.trim() };
+    }
     send(body);
   };
 
@@ -133,6 +140,21 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
             ))}
           </fieldset>
         </div>
+      )}
+      {isReminder && !rejecting && (
+        <label className="mt-3 block text-sm">
+          Reminder PayPal will email (edit before sending)
+          <textarea
+            value={text}
+            maxLength={500}
+            rows={4}
+            onChange={(e) => setText(e.target.value)}
+            className="mt-1 block w-full rounded-card border border-line px-3 py-2"
+          />
+          {typeof card.payload.send_after === "string" && (
+            <span className="text-xs text-muted">Suggested send date {card.payload.send_after}</span>
+          )}
+        </label>
       )}
       {(needsText || rejecting) && (
         <label className="mt-3 block text-sm">
@@ -241,6 +263,8 @@ export function resultLine(card: Card): { text: string; link: string | null } {
   if (r.reply_text) return { text: `Reply sent: “${r.reply_text}”`, link: null };
   if (card.kind === "PROMISE_NOTE") return { text: "Noted", link: null };
   if (card.kind === "REPLY") return { text: "Marked as seen", link: null };
+  if (card.kind === "REMINDER" && card.status === "DONE")
+    return { text: `Reminder sent on PayPal for ${card.invoice_no}`, link: card.paypal_url };
   return { text: card.status === "DONE" ? "Done" : card.status.toLowerCase(), link: null };
 }
 

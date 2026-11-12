@@ -294,3 +294,20 @@ async def put_adjustment(
             request_id=request_id(pp.settings, "adj", proposal_uid),
         )
     return await get(pp, invoice_id)
+
+
+async def remind(pp: PayPal, invoice_id: str, *, note: str, request_key: str) -> None:
+    """`POST /v2/invoicing/invoices/{id}/remind` (proved in P3b, CLAUDE §4): the recipient only,
+    empty 2xx. PayPal allows 2 a day per invoice — the sandbox doesn't enforce it, our
+    `reminders_sent` count does (P3b B6). `request_key` = `<invoice uid>-<YYYYMMDD>-<n>`."""
+    await pp.request(
+        "POST",
+        f"/v2/invoicing/invoices/{invoice_id}/remind",
+        json={
+            "subject": "Payment reminder",
+            "note": note,
+            "send_to_invoicer": False,
+            "send_to_recipient": True,
+        },
+        request_id=request_id(pp.settings, "rem", request_key),
+    )

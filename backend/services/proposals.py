@@ -30,8 +30,9 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.agent.facts import proposal_sku
+from backend.core.dates import today_ny
 from backend.core.money import to_cents
-from backend.db.models import Invoice, InvoiceLine, MemoLine, Proposal
+from backend.db.models import Invoice, InvoiceLine, MemoLine, Proposal, ReminderSent
 from backend.paypal import invoices as pinv
 from backend.paypal.client import PayPal, PayPalError
 from backend.services import audit
@@ -136,6 +137,8 @@ def _apply(
             raise ProposalError(409, "NOT_PENDING", "Proposal is REJECTED")
         if p.status == "DONE":
             return snapshot(p), None  # repeat approve: no-op
+        if p.kind == "REMINDER":
+            return _approve_reminder(s, p, edits, now)
         if p.kind != "ADJUSTMENT":
             return _approve_other(s, p, edits, now), None
 
@@ -189,6 +192,85 @@ def _apply(
             "reason": str(p.payload.get("reason") or ""),
         }
         return snapshot(p), job
+
+
+def _approve_reminder(
+    s: Session, p: Proposal, edits: dict[str, Any], now: datetime
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """P3b B6: PENDING (or FAILED → retry) → APPROVED under the buyer lock, the PayPal call
+    after commit. 2 per invoice per NY day (`reminders_sent`) → 409 REMIND_LIMIT. Edits:
+    `{text}` (≤ 500 chars). The day's attempt number is kept in the payload so a retry reuses
+    the same Request-Id."""
+    from backend.services import reminders
+
+    if p.status == "APPROVED":
+        raise ProposalError(409, "IN_FLIGHT", "This reminder is being sent")
+    unknown = set(edits) - {"text"}
+    if unknown:
+        raise ProposalError(422, "BAD_EDIT", f"can't edit {sorted(unknown)} here")
+    if "text" in edits:
+        text = str(edits["text"] or "").strip()
+        if not text or len(text) > 500:
+            raise ProposalError(422, "BAD_EDIT", "The reminder needs 1–500 characters")
+        p.payload = {
+            **p.payload,
+            "text": text,
+            "original": p.payload.get("original") or {"text": p.payload["text"]},
+        }
+    inv = s.get(Invoice, p.payload["invoice_id"])
+    if inv is None or inv.buyer_id != p.buyer_id:
+        raise ProposalError(409, "INVOICE_GONE", "The invoice for this reminder is gone")
+    day = today_ny()
+    sent = reminders.sent_today(s, inv.id, day)
+    if sent >= reminders.PER_DAY:
+        raise ProposalError(
+            409,
+            "REMIND_LIMIT",
+            "PayPal allows 2 reminders a day for an invoice — try again tomorrow.",
+        )
+    attempt = dict(p.payload.get("attempt") or {})
+    if attempt.get("day") != day.isoformat():
+        attempt = {"day": day.isoformat(), "n": sent + 1}
+    p.payload = {**p.payload, "attempt": attempt}
+    p.status, p.decided_at = "APPROVED", now
+    audit.log(s, "supplier", "proposal.approved", ref=str(p.id), detail={"kind": "REMINDER"})
+    job = {
+        "kind": "REMINDER",
+        "proposal_id": p.id,
+        "invoice_id": inv.id,
+        "paypal_invoice_id": inv.paypal_invoice_id,
+        "text": p.payload["text"],
+        "request_key": f"{inv.uid}-{attempt['day'].replace('-', '')}-{attempt['n']}",
+    }
+    return snapshot(p), job
+
+
+def _finish_reminder(
+    sf: Callable[[], Session], job: dict[str, Any], err: PayPalError | None
+) -> dict[str, Any]:
+    with sf() as s, s.begin():
+        p = _load(s, job["proposal_id"])
+        old = p.result or {}
+        attempts = int(old.get("attempts", 0)) + 1
+        if err is not None:
+            p.status = "FAILED"
+            p.result = {**old, "error": err.name, "debug_id": err.debug_id, "attempts": attempts}
+            log.warning("remind failed proposal=%s %s debug_id=%s", p.id, err.name, err.debug_id)
+            return snapshot(p)
+        now = datetime.now(UTC)
+        s.add(ReminderSent(invoice_id=job["invoice_id"], sent_at=now))
+        p.status = "DONE"
+        p.result = {
+            **old,
+            "sent_at": now.isoformat(),
+            "attempts": attempts,
+            "error": None,
+            "debug_id": None,
+        }
+        audit.log(
+            s, "paypal", "reminder.sent", ref=str(p.id), detail={"invoice_id": job["invoice_id"]}
+        )
+        return snapshot(p)
 
 
 def _approve_other(s: Session, p: Proposal, edits: dict[str, Any], now: datetime) -> dict:
@@ -262,6 +344,18 @@ async def decide(
     snap, job = await run_in_threadpool(_apply, sf, proposal_id, decision, buyer_ids, mode, edits)
     if job is None:
         return snap
+    if job.get("kind") == "REMINDER":
+        rerr: PayPalError | None = None
+        if not job["paypal_invoice_id"]:
+            rerr = PayPalError("NOT_MIRRORED", "invoice isn't on PayPal yet", None, [], None, False)
+        else:
+            try:
+                await pinv.remind(
+                    pp, job["paypal_invoice_id"], note=job["text"], request_key=job["request_key"]
+                )
+            except PayPalError as e:
+                rerr = e
+        return await run_in_threadpool(_finish_reminder, sf, job, rerr)
     body: dict[str, Any] | None = None
     err: PayPalError | None = None
     if not job["paypal_invoice_id"]:

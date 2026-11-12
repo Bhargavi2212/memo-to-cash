@@ -15,12 +15,13 @@ from pydantic import BaseModel, StrictInt
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from backend.agent import llm
 from backend.core.config import Settings, get_settings
 from backend.core.dates import today_ny
 from backend.core.split import SplitError
 from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
-from backend.services import demo, mirror, payments, proposals
+from backend.services import demo, mirror, payments, proposals, reminders
 from backend.services import supplier as svc
 
 router = APIRouter(prefix="/api/supplier")
@@ -214,3 +215,43 @@ async def buyer_setup(
     except svc.NotFoundError:
         return _error(404, *NOT_FOUND)
     return {"paypal_setup": await mirror.ensure_setup(bid, pp, settings, session_factory)}
+
+
+def _reminder_target(
+    request: Request, session_factory: Callable[[], Session], settings: Settings, invoice_id: int
+) -> int:
+    from backend.db.models import Invoice
+
+    with session_factory() as s:
+        inv = s.get(Invoice, invoice_id)
+        if inv is None:
+            raise svc.NotFoundError
+        svc.buyer_in_scope(s, _scope(request, s, settings), inv.buyer_id)  # 404 out of scope
+        return inv.id
+
+
+@router.post("/invoices/{invoice_id}/reminder")
+async def draft_reminder(
+    invoice_id: int,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    session_factory: Annotated[Callable[[], Session], Depends(get_session_factory)],
+    client: Annotated[Any, Depends(llm.get_job_client)],
+) -> Any:
+    """P3b B6 "Draft a reminder" (buyer page, demo copies too): the agent drafts → a PENDING
+    REMINDER card. Not past due / promise / one pending → 422/409; draft failed → 503."""
+    try:
+        iid = await run_in_threadpool(
+            _reminder_target, request, session_factory, settings, invoice_id
+        )
+        proposal_id = await reminders.draft(session_factory, iid, client=client, actor="supplier")
+    except svc.ScopeError as e:
+        return _error(e.status, e.code, e.message)
+    except svc.NotFoundError:
+        return _error(404, *NOT_FOUND)
+    except reminders.ReminderError as e:
+        return _error(e.status, e.code, e.message)
+    with session_factory() as s:
+        from backend.db.models import Proposal
+
+        return svc.cards(s, [s.get(Proposal, proposal_id)])[0]

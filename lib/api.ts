@@ -221,6 +221,7 @@ export interface SupplierInvoice extends Invoice {
   paypal_synced_at: string | null;
   mismatch: string | null;
   adjustments: { name: string; amount_cents: number }[];
+  reminder: "AVAILABLE" | "PENDING" | null; // P3b F10: "Draft a reminder" button state
 }
 
 export interface BuyerDetail {
@@ -372,5 +373,7 @@ export const api = {
       call<ProposalCard>(`/supplier/proposals/${id}/decide`, post(body)),
     record: (body: RecordBody) => call<RecordResult>("/supplier/payments/record", post(body)),
     setup: (id: number) => call<SetupResult>(`/supplier/buyers/${id}/setup`, post({})),
+    draftReminder: (invoiceId: number) =>
+      call<ProposalCard>(`/supplier/invoices/${invoiceId}/reminder`, post({})),
   },
 };

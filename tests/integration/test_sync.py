@@ -562,3 +562,19 @@ async def test_a_second_sweep_while_one_runs_is_skipped(db, pp, fake, buyer, set
     assert sorted([first, second]) == [0, 1]  # one did the work, the other returned at once
     assert fake.ops().count("order_get") == 1
     assert await sync.sweep(SessionLocal, pp, settings) == 0  # the flag was released
+
+
+async def test_the_d23_note_shows_its_text_on_the_supplier_card(db, pp, fake, buyer, settings):
+    from backend.services.supplier import cards
+
+    o = await paid_5000(db, pp, fake, buyer, settings)
+    i38 = inv(db, "INV-1038")
+    fake.pay_elsewhere(i38.paypal_invoice_id, 350000)
+    await pay.record_allocations(SessionLocal, pp, o.payment_id)
+    await event(pp, settings, "INVOICING.INVOICE.PAID", paid_event(i38))
+    reply = db.scalars(select(Proposal).where(Proposal.kind == "REPLY")).one()
+    (card,) = cards(db, [reply])
+    assert card.summary == (
+        "$3,500.00 paid twice on INV-1038 — held as credit; refund it from "
+        "PayPal if they want it back."
+    )  # X6, internal only to the buyer

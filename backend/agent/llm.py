@@ -21,7 +21,14 @@ from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from backend.agent.facts import Facts
-from backend.agent.schemas import ANSWER_SCHEMA, TRIAGE_SCHEMA, AnswerResult, TriageResult
+from backend.agent.schemas import (
+    ANSWER_SCHEMA,
+    REMINDER_SCHEMA,
+    TRIAGE_SCHEMA,
+    AnswerResult,
+    ReminderDraft,
+    TriageResult,
+)
 from backend.agent.tools import facts_prompt
 from backend.core.config import settings
 
@@ -133,6 +140,7 @@ class Job:
 JOBS = {
     "triage": Job("triage", "triage.md", TRIAGE_SCHEMA, TriageResult),
     "answer": Job("answer", "answer.md", ANSWER_SCHEMA, AnswerResult),
+    "reminder": Job("reminder", "reminder.md", REMINDER_SCHEMA, ReminderDraft),  # P3b Job C
 }
 
 
@@ -166,8 +174,11 @@ def prompt_version(job: str) -> str:
 
 
 def messages(job: str, facts: Facts, text: str) -> list[dict[str, str]]:
+    system = {"role": "system", "content": prompt_text(job) + "\n" + facts_prompt(facts)}
+    if job == "reminder":  # the request comes from our own code, not a buyer (P3b B6)
+        return [system, {"role": "user", "content": text}]
     return [
-        {"role": "system", "content": prompt_text(job) + "\n" + facts_prompt(facts)},
+        system,
         {"role": "user", "content": f"{INTRO}\n<buyer_message>\n{text}\n</buyer_message>"},
     ]
 
