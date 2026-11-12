@@ -63,6 +63,7 @@ export interface BuyerRequest {
   summary: string;
   status: RequestStatus;
   created_at: string | null;
+  reply: string | null;
 }
 
 /** POST /ask (P4 D10). `looked_up` = cited records that exist ("Looked up" trace). */
@@ -120,7 +121,7 @@ export interface ReceiptAllocation {
 
 export interface Receipt {
   payment_id: number;
-  status: "CAPTURED" | "CAPTURE_PENDING";
+  status: "CAPTURED" | "CAPTURE_PENDING" | "RECORDED";
   paypal_capture_id: string | null;
   amount_cents: number;
   received_at: string | null;
@@ -144,6 +145,153 @@ export interface DemoStart {
 export interface PayRequest {
   invoice_ids?: number[];
   amount_cents?: number;
+}
+
+// ---------- supplier side (P3a) ----------
+
+export interface ProposalCard {
+  id: number;
+  kind: "ADJUSTMENT" | "RETURN_CHECK" | "REMINDER" | "REPLY" | "PROMISE_NOTE";
+  status: "PENDING" | "APPROVED" | "REJECTED" | "DONE" | "FAILED";
+  source: "agent" | "seed" | "fallback";
+  buyer: { id: number; name: string };
+  summary: string;
+  checks: string[];
+  message_text: string | null;
+  payload: Record<string, unknown> & {
+    amount_cents?: number;
+    mode?: "APPLY" | "CREDIT";
+    credit_cents?: number;
+    reason?: string;
+    items?: { text: string }[];
+  };
+  due_cents: number | null;
+  suggested: "APPLY" | "CREDIT" | null;
+  result: (Record<string, unknown> & {
+    paypal_due_cents?: number;
+    error?: string | null;
+    reply_text?: string;
+  }) | null;
+  invoice_no: string | null;
+  paypal_url: string | null;
+}
+
+export interface SupplierOverview {
+  totals: { open_cents: number; past_due_cents: number; paid_this_week_cents: number };
+  buyers: {
+    id: number;
+    name: string;
+    out: number;
+    kept: number;
+    returned: number;
+    owed_cents: number;
+    oldest_age_days: number;
+    past_due_cents: number;
+    credit_cents: number;
+    last_payment: { amount_cents: number; received_at: string | null } | null;
+    pending_proposals: number;
+    promise: string | null;
+  }[];
+  pending: ProposalCard[];
+  recent_payments: {
+    id: number;
+    buyer: { id: number; name: string };
+    amount_cents: number;
+    source: string;
+    method: string | null;
+    received_at: string | null;
+    split: { invoice_no: string; amount_cents: number }[];
+    recorded_all: boolean;
+  }[];
+}
+
+export interface SupplierInvoice extends Invoice {
+  paypal_status: string | null;
+  paypal_due_cents: number | null;
+  paypal_synced_at: string | null;
+  mismatch: string | null;
+  adjustments: { name: string; amount_cents: number }[];
+}
+
+export interface BuyerDetail {
+  buyer: { id: number; name: string; is_demo: boolean };
+  statement_url: string;
+  statement_token: string;
+  owed_cents: number;
+  past_due_cents: number;
+  oldest_age_days: number;
+  credit_cents: number;
+  memos: Memo[];
+  invoices: SupplierInvoice[];
+  messages: { id: number; kind: string; text: string; label: string | null; created_at: string }[];
+  proposals: ProposalCard[];
+  payments: {
+    id: number;
+    source: string;
+    status: string;
+    method: string | null;
+    reference: string | null;
+    amount_cents: number;
+    unapplied_cents: number;
+    received_at: string | null;
+    allocations: { invoice_no: string; amount_cents: number; record_state: string; error: string | null }[];
+  }[];
+}
+
+export interface PaymentDetail {
+  payment: {
+    id: number;
+    source: string;
+    status: string;
+    method: string | null;
+    reference: string | null;
+    amount_cents: number;
+    unapplied_cents: number;
+    received_at: string | null;
+    paypal_order_id: string | null;
+    paypal_capture_id: string | null;
+  };
+  buyer: { id: number; name: string };
+  allocations: {
+    invoice_id: number;
+    invoice_no: string;
+    amount_cents: number;
+    record_state: string;
+    paypal_transaction_id: string | null;
+    error: string | null;
+    paypal_status: string | null;
+    paypal_due_cents: number | null;
+    paypal_synced_at: string | null;
+    mismatch: string | null;
+    paypal_url: string | null;
+  }[];
+  timeline: { at: string; actor: string; action: string; invoice_no: string | null }[];
+}
+
+export interface DecideBody {
+  decision: "APPROVE" | "REJECT";
+  mode?: "APPLY" | "CREDIT";
+  edits?: { amount_cents?: number; reason?: string; text?: string };
+}
+
+export interface RecordBody {
+  buyer_id: number;
+  client_uid: string;
+  method: "CHECK" | "WIRE_TRANSFER" | "OTHER";
+  reference: string;
+  amount_cents?: number;
+  invoice_ids?: number[];
+  received_on?: string;
+}
+
+export interface RecordResult {
+  payment_id: number;
+  method: string;
+  reference: string | null;
+  amount_cents: number;
+  received_at: string | null;
+  allocations: { invoice_no: string; amount_cents: number; record_state: string }[];
+  repeat: boolean;
 }
 
 /** {error:{code,message,paypal_debug_id?}} from the API (BACKEND_SCHEMA §2), or a network failure. */
@@ -203,4 +351,13 @@ export const api = {
     call<AskResult>(`/statement/${enc(token)}/ask`, post({ question })),
   message: (token: string, text: string) =>
     call<MessageResult>(`/statement/${enc(token)}/message`, post({ text })),
+  whoami: () => call<{ statement_token: string | null }>("/demo/whoami"),
+  supplier: {
+    overview: () => call<SupplierOverview>("/supplier/overview"),
+    buyer: (id: number) => call<BuyerDetail>(`/supplier/buyers/${id}`),
+    payment: (id: number) => call<PaymentDetail>(`/supplier/payments/${id}`),
+    decide: (id: number, body: DecideBody) =>
+      call<ProposalCard>(`/supplier/proposals/${id}/decide`, post(body)),
+    record: (body: RecordBody) => call<RecordResult>("/supplier/payments/record", post(body)),
+  },
 };

@@ -11,6 +11,7 @@ import { ApiError, api, type Receipt as ReceiptData } from "@/lib/api";
 import { shortDate } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 
+import { SeeAsSupplier } from "./SeeAsSupplier";
 import { StatusChip } from "./StatusChip";
 
 const POLL_MS = 2000;
@@ -23,7 +24,7 @@ type Load =
   | { kind: "ready"; receipt: ReceiptData };
 
 const unsettled = (r: ReceiptData) =>
-  r.status === "CAPTURED" && r.allocations.some((a) => !a.recorded && a.record_state !== "FAILED");
+  (r.status === "CAPTURED" || r.status === "RECORDED") && r.allocations.some((a) => !a.recorded && a.record_state !== "FAILED");
 
 export function ReceiptSkeleton() {
   return <div aria-busy="true" className="h-64 animate-pulse rounded-card bg-line" />;
@@ -196,7 +197,10 @@ export function Receipt() {
         )}
       </section>
 
-      {back}
+      <div className="flex flex-wrap gap-3">
+        {back}
+        <SeeAsSupplier token={token} />
+      </div>
     </div>
   );
 }

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.agent import llm
 from backend.core.config import Settings, get_settings
-from backend.db.session import get_session_factory
+from backend.db.session import get_session, get_session_factory
 from backend.paypal.client import PayPal, get_paypal
 from backend.services import demo
 
@@ -65,3 +65,18 @@ async def demo_start(
         samesite="lax",
     )
     return resp
+
+
+@router.get("/demo/whoami")
+def demo_whoami(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, str | None]:
+    """The statement token of the cookie's own demo copy (P3 A10, R10): the "See it as Demo
+    Diamond Co." link shows only on that copy's pages. No cookie / not demo mode → null."""
+    from backend.services import supplier
+
+    return {
+        "statement_token": supplier.whoami(session, settings, request.cookies.get(demo.COOKIE_NAME))
+    }

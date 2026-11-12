@@ -17,6 +17,7 @@ from backend.core.money import to_cents
 from backend.core.split import OpenInvoice, split_payment
 from backend.db import models as m
 from backend.services import importer
+from backend.services.credit import buyer_credit_cents
 from backend.services.demo import BUYER_NAME, build_csv
 
 
@@ -304,5 +305,5 @@ def facts_for_buyer(session: Session, buyer_id: int, today: date) -> Facts:
         invoices=tuple(sorted(invoices, key=lambda i: (i.due_on, i.invoice_no))),
         payments=payments,
         proposals=proposals,
-        credit_cents=sum(p.unapplied_cents for p in pay_rows),
+        credit_cents=buyer_credit_cents(session, buyer_id),  # same as the statement (G5)
     )

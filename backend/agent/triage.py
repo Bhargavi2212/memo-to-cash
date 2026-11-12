@@ -68,10 +68,18 @@ def summary(
     promise_date: str | None = None,
     reason: str | None = None,
     fallback: bool = False,
+    status: str | None = None,
+    mode: str | None = None,
+    credit_cents: int | None = None,
 ) -> str:
-    """One proposal's code-written summary (also computed at read time for `requests`, D17)."""
+    """One proposal's code-written summary (also computed at read time for `requests`, D17).
+    A decided deduction reads the way the buyer should understand it (P3 A11, G24)."""
     if kind == "ADJUSTMENT" and amount_cents is not None:
         money = usd(abs(amount_cents))
+        if status == "DONE" and mode == "CREDIT":
+            return f"Approved as {usd(credit_cents or abs(amount_cents))} credit on your account"
+        if status in ("APPROVED", "DONE"):
+            return f"Approved — {money} off {invoice_no or 'your invoice'}"
         return f"−{money} on {invoice_no or 'your invoice'} for {sku or 'an item'}"
     if kind == "RETURN_CHECK":
         return f"Return of {sku or 'an item'} — Demo Diamond Co. will check their records"

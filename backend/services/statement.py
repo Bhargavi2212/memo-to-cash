@@ -30,6 +30,7 @@ from backend.db.models import (
     Payment,
     Proposal,
 )
+from backend.services.credit import credit_from
 
 log = logging.getLogger("statement")
 
@@ -120,6 +121,7 @@ class RequestOut(BaseModel):
     summary: str
     status: str  # WAITING | APPROVED | DECLINED | ANSWERED
     created_at: date | None
+    reply: str | None = None  # Demo Diamond Co.'s reply text, if any (P3 A8)
 
 
 def request_status(kind: str, status: str) -> str:
@@ -145,6 +147,9 @@ def _requests(rows: list[Any], inv_no: dict[int, str]) -> list[RequestOut]:
             promise_date=pl.get("promise_date"),
             reason=None if p.evidence.get("internal") else pl.get("reason"),  # guard notes
             fallback="fallback_day" in pl,
+            status=p.status,
+            mode=pl.get("mode"),
+            credit_cents=pl.get("credit_cents"),
         )
         out.append(
             RequestOut(
@@ -153,6 +158,7 @@ def _requests(rows: list[Any], inv_no: dict[int, str]) -> list[RequestOut]:
                 summary=text,
                 status=request_status(p.kind, p.status),
                 created_at=ny_date(at) if at else None,
+                reply=(p.result or {}).get("reply_text"),
             )
         )
     return out
@@ -358,7 +364,7 @@ def get_statement(session: Session, token: str, today: date, settings: Settings)
         ],
         invoices=inv_out,
         payments=pay_out,
-        credit_cents=sum(p.unapplied_cents for p in payments if p.status in LISTED),
+        credit_cents=credit_from(payments, (p for p, _at in proposal_rows)),  # one rule (G5)
         notices=notices,
         pending_proposals=pending,
         requests=_requests(proposal_rows, inv_no),
@@ -405,7 +411,7 @@ class ReceiptAllocation(BaseModel):
 
 class Receipt(BaseModel):
     payment_id: int
-    status: str  # CAPTURED | CAPTURE_PENDING
+    status: str  # CAPTURED | CAPTURE_PENDING | RECORDED (off-PayPal, P3 A9)
     paypal_capture_id: str | None
     amount_cents: int
     received_at: date | None
@@ -416,10 +422,15 @@ class Receipt(BaseModel):
 
 
 def get_receipt(session: Session, token: str, payment_id: int) -> Receipt:
-    """Scoped to the token's buyer; only payments that reached PayPal capture have one."""
+    """Scoped to the token's buyer; payments that reached PayPal capture, and off-PayPal
+    payments the supplier recorded (P3 A9 — so `/refresh` retries their recording, R3)."""
     buyer = find_buyer(session, token)
     p = session.get(Payment, payment_id)
-    if p is None or p.buyer_id != buyer.id or p.status not in ("CAPTURED", "CAPTURE_PENDING"):
+    if (
+        p is None
+        or p.buyer_id != buyer.id
+        or p.status not in ("CAPTURED", "CAPTURE_PENDING", "RECORDED")
+    ):
         raise StatementNotFoundError
     rows, _ = open_invoices(session, buyer.id)
     by_id = {i.id: i for i in rows}

@@ -60,7 +60,7 @@ memo-to-cash/
 │       ├── buyers/[id]/page.tsx    P3 buyer detail (copy link, record payment)
 │       ├── payments/[id]/page.tsx  P3 payment detail
 │       └── import/page.tsx         P3 ERP upload (admin only)
-├── components/                     P2 Statement · PayPanel · MemoGroup · InvoiceList · StatusChip · Notices · DemoLogin · Receipt · StartDemo — P3–P4 AskBox · ProposalCard · RecordPaymentModal · supplier/SampleRows.tsx
+├── components/                     P2 Statement · PayPanel · MemoGroup · InvoiceList · StatusChip · Notices · DemoLogin · Receipt · StartDemo — P4 AskBox · MessageBox · YourRequests — P3a SeeAsSupplier · SupplierEntry · supplier/{Overview,BuyerDetail,PaymentDetail,ProposalCard,RecordPaymentModal,SupplierShell}.tsx
 ├── lib/
 │   ├── api.ts                      P2 typed API client
 │   ├── money.ts                    P2 the only money formatter
@@ -74,7 +74,7 @@ memo-to-cash/
 │   ├── core/       config.py (sandbox guard) P0 · money.py P1 · dates.py P1 · split.py P2 · logging.py P2 (statement tokens out of access logs)
 │   ├── db/         session.py P0 (+ get_session_factory P2) · models.py P1 · migrations/ (Alembic) P0–P2
 │   ├── paypal/     client.py P1 · invoices.py P1 · orders.py P2 · webhooks.py P3
-│   ├── services/   importer.py P1 · mirror.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · agent.py (ask + message) P4 · sync.py (sweep) P3 · proposals.py P4 (approve → PayPal) · audit.py P1
+│   ├── services/   importer.py P1 · mirror.py P1 · demo.py P1 · statement.py P2 · payments.py P2 · agent.py (ask + message) P4 · supplier.py (scope, overview, buyer detail, proposal cards) P3a · sync.py (sweep) P3 · proposals.py P4 (approve → PayPal) · audit.py P1
 │   ├── routes/     health.py P0 · demo.py P1 · statement.py P2 · config.py P2 (`GET /api/config`) · supplier.py P4 (decide) + P3a · paypal_webhook.py P3
 │   └── agent/      llm.py P0 (smoke call) → P4 · facts.py · tools.py (Facts → prompt text) · actions.py (decide) · dates.py · prompts/triage.md (P4 step 0) · schemas.py · validate.py · caps.py · answer.py · triage.py · prompts/answer.md   P4
 ├── seed/
