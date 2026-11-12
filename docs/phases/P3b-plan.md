@@ -82,3 +82,16 @@ Everything in steps 1–5 runs locally with fakes (fake PayPal incl. a fake veri
 | **Total** | **~6 h** of my time, against the spec's ~2–2.5 h. F4, F8, F9, F10, D23 reconcile and refund/cancel handling are more than the original B-rows. |
 
 Track record: P4 ran ~4× under my estimate; phase M ran about as planned (~2.5 h including the option-2 redesign). So expect **~3.5–6 h**. Thu 08:00 → 13:30 ET is 5.5 h, with step 6 needing you, so the cut order in G18 is likely to matter: steps 1–3 should land; 4 and 5 are at risk. Starting step 1 tonight after your approval would remove most of that risk.
+
+## 6. Review resolutions (Bhargavi, Wed Nov 11 ~21:45 ET) — approved
+- **G8 yes:** F3 and F4 are built in 1c. **G13:** worker on Render `starter`; Bhargavi confirms the price at Blueprint sync. All other gaps as proposed.
+- **X1 Server-side capture waits 10 min.** The webhook `ORDER.APPROVED` and the sweep capture a CREATED payment only if it was created **≥ 10 min** ago; earlier → the event is marked processed as a no-op and the sweep picks the payment up later. (The sweep's "CREATED > 2 min → GET order" still **finishes** COMPLETED orders at 2 min — that's no new capture.) A client `/capture` on a payment that is already captured returns the receipt, not an error (the existing `ORDER_ALREADY_CAPTURED` → GET → finish path, and `CAPTURED` → receipt). Tests: webhook/sweep-first then client, and client-first then webhook → exactly one capture, the buyer gets the receipt both ways (1b/1c).
+- **X2 F3 refetch** never runs while the PayPanel is busy (order / approve / capture in flight) and never remounts the PayPanel (the refetch only updates the statement data; the panel's `key` is unchanged unless balances changed).
+- **X3 Import page token** is an `<input type="password">`, kept in memory only. README + video say the token shown is rotated; Bhargavi rotates `ADMIN_TOKEN` after recording.
+- **X4 Import page** doesn't use `useSupplierData` (no 401 → landing redirect) and loads with no cookie (test).
+- **X5 Worker activity query** ignores `webhook_events` whose `error = 'ignored: unknown'` (dev events reaching production must not keep the worker at 30 s).
+- **X6 D23 supplier card text:** "$X paid twice — held as credit; refund it from PayPal if they want it back."
+- **X7 Step 6** records which path caught the PayPal-page payment: F3 (refetch showed it paid) or F4 (409 `PAID_ELSEWHERE` at Pay All) — from the api logs / audit (`sync.backfill` with `via: webhook|pay_check|sweep`).
+- **Tonight:** build 1a–1c on `p3b-sync`, push, give PR links; don't ask for merges (Bhargavi's message was cut off after "until" — to confirm).
+
+## 7. Build log
