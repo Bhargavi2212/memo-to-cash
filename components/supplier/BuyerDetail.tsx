@@ -175,6 +175,7 @@ export function BuyerDetail() {
         <h2 id="msg-h" className="px-4 pt-4 text-lg font-semibold">
           Messages from {d.buyer.name}
         </h2>
+        {d.messages.length === 0 && <p className="px-4 py-3 text-sm text-muted">No messages yet.</p>}
         <ul className="divide-y divide-line">
           {d.messages.map((m) => (
             <li key={m.id} className="px-4 py-3 text-sm">
