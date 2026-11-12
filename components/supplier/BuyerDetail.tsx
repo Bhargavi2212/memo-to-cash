@@ -23,16 +23,17 @@ export function BuyerDetail() {
   const { data: d, error } = useSupplierData(() => api.supplier.buyer(Number(id)), reload);
   const [copied, setCopied] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [demo, setDemo] = useState(false);
+  // null until known: the banner must not appear after the page and push buttons down
+  const [demo, setDemo] = useState<boolean | null>(null);
   useEffect(() => {
     api
       .config()
       .then((c) => setDemo(c.demo_mode))
-      .catch(() => undefined);
+      .catch(() => setDemo(false));
   }, []);
 
   if (error) return <p role="alert">{error}</p>;
-  if (!d) return <div aria-busy="true" className="h-48 animate-pulse rounded-card bg-line" />;
+  if (!d || demo === null) return <div aria-busy="true" className="h-48 animate-pulse rounded-card bg-line" />;
   const open = d.proposals.filter((p) => p.status === "PENDING" || p.status === "FAILED");
   const decided = d.proposals.filter((p) => !(p.status === "PENDING" || p.status === "FAILED"));
   const refresh = () => setReload((n) => n + 1);

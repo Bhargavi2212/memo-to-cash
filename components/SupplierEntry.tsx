@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ApiError, api } from "@/lib/api";
+import { useHydrated } from "@/lib/useHydrated";
 
 export function SupplierEntry() {
   const router = useRouter();
+  const ready = useHydrated();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +31,7 @@ export function SupplierEntry() {
       <button
         type="button"
         onClick={go}
-        disabled={busy}
+        disabled={busy || !ready}
         className="min-h-11 rounded-card border border-accent px-5 font-medium text-accent disabled:opacity-60"
       >
         {busy ? "Opening…" : "See the supplier side"}

@@ -23,17 +23,18 @@ function oldest(b: Buyer): string {
 export function Overview() {
   const [reload, setReload] = useState(0);
   const { data, error } = useSupplierData(api.supplier.overview, reload);
-  const [demo, setDemo] = useState(false);
+  // null until known: the banner must not appear after the page and push buttons down
+  const [demo, setDemo] = useState<boolean | null>(null);
   const [decided, setDecided] = useState<Card[]>([]);
   useEffect(() => {
     api
       .config()
       .then((c) => setDemo(c.demo_mode))
-      .catch(() => undefined);
+      .catch(() => setDemo(false));
   }, []);
 
   if (error) return <p role="alert">{error}</p>;
-  if (!data)
+  if (!data || demo === null)
     return (
       <div aria-busy="true" className="animate-pulse space-y-4">
         <div className="h-16 rounded-card bg-line" />

@@ -22,7 +22,8 @@ export function SupplierBanner() {
     };
   }, []);
   return (
-    <p className="rounded-card bg-accent/5 px-4 py-2 text-sm">
+    // two lines reserved on phones so the late link doesn't push the page down
+    <p className="min-h-14 rounded-card bg-accent/5 px-4 py-2 text-sm sm:min-h-0">
       Supplier view of your demo copy
       {token && (
         <>
