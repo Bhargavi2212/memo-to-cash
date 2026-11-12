@@ -52,7 +52,7 @@ export function ImportPage() {
         <p className="mt-1 text-sm text-muted">
           One CSV with buyers, memos, lines, returns and invoices. Every row is checked first — a
           file with any bad row changes nothing. New invoices go on PayPal right away.{" "}
-          <a href="/api/supplier/import/sample.csv" className="text-accent underline">
+          <a href="/api/supplier/import/sample.csv" download="sample_export.csv" className="text-accent underline">
             Download the sample file
           </a>{" "}
           (three buyers, dated today).
