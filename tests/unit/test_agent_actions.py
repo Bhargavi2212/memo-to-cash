@@ -40,7 +40,7 @@ def test_return_claim_returned_plus_out_gives_an_answer_and_a_check():
 def test_return_claim_known_plus_unknown_keeps_the_known_item():
     a = rc("S-103", "S-199")
     assert a.code == "RETURN_CHECK:NO_RECORD:S-103|REPLY:UNKNOWN:S-199"
-    assert a.each()[1].reason == "S-199 isn't on your memos — Demo Diamond Co. will check"
+    assert a.each()[1].reason == "S-199 isn't on your memos. Demo Diamond Co. will check"
 
 
 def test_return_claim_two_checks_and_a_kept_item():

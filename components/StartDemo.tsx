@@ -52,8 +52,8 @@ export function StartDemo() {
       </div>
       <p aria-live="polite" className="text-sm text-muted">
         {busy
-          ? "Creating your PayPal sandbox invoices… (~2–5 s)"
-          : "Your own copy — every click makes a fresh one; the old one is left behind."}
+          ? "Setting up your demo… (a few seconds)"
+          : "You get your own private copy. Click again any time to start fresh."}
       </p>
       {error && (
         <p role="alert" className="text-sm text-danger">

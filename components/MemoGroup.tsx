@@ -11,20 +11,20 @@ import { StatusChip } from "./StatusChip";
 
 function LineStatus({ line }: { line: Line }) {
   if (line.status === "KEPT")
-    return <StatusChip tone="accent">Kept → {line.invoice_no ?? "invoice"}</StatusChip>;
+    return <StatusChip tone="accent">Kept · billed on {line.invoice_no ?? "an invoice"}</StatusChip>;
   if (line.status === "RETURNED") {
-    const ago = line.returned_on ? `, ${daysAgo(line.returned_on)}d ago` : "";
+    const ago = line.returned_on ? ` ${daysAgo(line.returned_on)} days ago` : "";
     return (
       <StatusChip tone="success">
-        ✓ Returned{line.return_ref ? ` · ${line.return_ref}` : ""}
-        {ago}
+        ✓ Returned{ago}
+        {line.return_ref ? ` (${line.return_ref})` : ""}
       </StatusChip>
     );
   }
   const due = line.due_back_on ? daysUntil(line.due_back_on) : null;
   const when =
-    due === null ? "" : due >= 0 ? `, due back in ${due}d` : `, due back ${-due}d ago`;
-  return <StatusChip tone="muted">Still with you{when}</StatusChip>;
+    due === null ? "" : due >= 0 ? ` · due back in ${due} days` : ` · was due back ${-due} days ago`;
+  return <StatusChip tone="muted">With you{when}</StatusChip>;
 }
 
 export function MemoGroup({
@@ -57,7 +57,7 @@ export function MemoGroup({
       >
         <span>
           <span className="font-medium">Memo {memo.memo_no}</span>
-          <span className="ml-2 text-sm text-muted">sent {daysAgo(memo.sent_on)}d ago</span>
+          <span className="ml-2 text-sm text-muted">sent {daysAgo(memo.sent_on)} days ago</span>
         </span>
         <span className="text-xs text-muted">
           {kept} kept · {returned} returned · {out} with you {open ? "▾" : "▸"}

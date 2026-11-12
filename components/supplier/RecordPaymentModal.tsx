@@ -138,7 +138,7 @@ export function RecordPaymentModal({
             )}
             {amount !== null && amount > 0 && !over && (
               <div aria-live="polite" className="rounded-card border border-line bg-canvas p-3">
-                <p className="text-xs font-medium text-muted">Split, oldest due first</p>
+                <p className="text-xs font-medium text-muted">Applied to the oldest invoices first</p>
                 {preview && preview.total_cents === amount ? (
                   <ul className="mt-1 space-y-1">
                     {preview.allocations.map((a) => {

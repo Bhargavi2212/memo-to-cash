@@ -213,7 +213,7 @@ export function PayPanel({
         )}
         {demo && custom && amountText === DEMO_AMOUNT && (
           <p className="text-sm text-muted">
-            Demo: one payment split across two invoices — or pay the full{" "}
+            Demo tip: $5,000 pays two invoices at once. Or pay the full{" "}
             {formatCents(statement.owed_cents)}.
           </p>
         )}
@@ -228,7 +228,7 @@ export function PayPanel({
           ) : preview ? (
             <>
               <p className="font-medium">
-                Pay <span className="tabular">{formatCents(total)}</span> — split:
+                <span className="tabular">{formatCents(total)}</span> goes to:
               </p>
               <ul className="mt-1 space-y-0.5">
                 {preview.allocations.map((a) => {
@@ -238,7 +238,7 @@ export function PayPanel({
                       {a.invoice_no} {formatCents(a.amount_cents)}
                       <span className="text-muted">
                         {" "}
-                        → {left && left.due_cents > 0 ? `${formatCents(left.due_cents)} left` : "paid in full"}
+                        · {left && left.due_cents > 0 ? `${formatCents(left.due_cents)} left to pay` : "paid in full"}
                       </span>
                     </li>
                   );
@@ -257,7 +257,7 @@ export function PayPanel({
 
       {unconfirmed && (
         <div role="alert" className="rounded-card border border-warning/30 bg-warning/5 p-4 text-sm">
-          <p>We couldn&apos;t confirm your payment yet — don&apos;t pay again.</p>
+          <p>We couldn&apos;t confirm your payment yet. Please don&apos;t pay again.</p>
           <button
             type="button"
             onClick={() => {
@@ -276,7 +276,7 @@ export function PayPanel({
         <p className="text-sm text-danger">Payments aren&apos;t configured on this server.</p>
       ) : sdkFailed ? (
         <div className="rounded-card border border-line bg-surface p-4 text-sm">
-          <p>PayPal&apos;s buttons didn&apos;t load. You can still pay each invoice on PayPal:</p>
+          <p>PayPal didn&apos;t load. You can still pay each invoice on PayPal:</p>
           <ul className="mt-2 list-disc pl-5">
             {statement.invoices
               .filter((i) => i.due_cents > 0 && i.paypal_url)

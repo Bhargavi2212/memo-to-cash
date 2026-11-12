@@ -12,7 +12,7 @@ from backend.agent.facts import Facts
 from backend.agent.tools import record_ids
 from backend.agent.validate import check_answer
 
-FALLBACK_TEXT = "I'm not sure — I've asked Demo Diamond Co. to reply."
+FALLBACK_TEXT = "I'm not sure, so I've asked Demo Diamond Co. to reply."
 
 
 @dataclass

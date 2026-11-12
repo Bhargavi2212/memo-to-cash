@@ -145,7 +145,7 @@ export function Statement() {
         <p className="tabular text-3xl font-semibold">{formatCents(s.owed_cents)}</p>
         <p className="mt-1 text-sm text-muted">
           {open.length === 0 ? "All paid" : `${open.length} ${open.length === 1 ? "invoice" : "invoices"}`}
-          {open.length > 0 && ` · oldest ${s.oldest_age_days} days`}
+          {open.length > 0 && ` · oldest is ${s.oldest_age_days} days old`}
           {s.past_due_cents > 0 && (
             <span className="text-warning"> · {formatCents(s.past_due_cents)} past due</span>
           )}
@@ -154,7 +154,7 @@ export function Statement() {
           <p className="mt-2 text-sm">
             Credit <span className="tabular">{formatCents(s.credit_cents)}</span>
             <span className="block text-xs text-muted">
-              {s.supplier.name} will apply it to a future invoice or refund it in PayPal.
+              {s.supplier.name} will use it on a future invoice or refund it.
             </span>
           </p>
         )}
@@ -184,7 +184,7 @@ export function Statement() {
 
       <section aria-labelledby="memos-h" className="space-y-3">
         <h2 id="memos-h" className="text-lg font-semibold">
-          What you have on memo
+          Your memos
         </h2>
         {s.memos.map((m, i) => (
           <MemoGroup key={m.memo_no} memo={m} defaultOpen={i === 0} focus={focus} />

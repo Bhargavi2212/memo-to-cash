@@ -392,6 +392,8 @@ def _create_copy(
 def _seed_proposal(s: Session, buyer_id: int, msg: Message) -> Proposal:
     """The P1 deterministic proposal — the fallback when the agent's triage isn't the
     expected one (D13)."""
+    from backend.agent.tools import usd  # here, not at the top: agent.facts imports this module
+
     inv = s.scalars(
         select(Invoice).where(Invoice.buyer_id == buyer_id, Invoice.erp_invoice_no == "INV-1051")
     ).one()
@@ -411,9 +413,9 @@ def _seed_proposal(s: Session, buyer_id: int, msg: Message) -> Proposal:
         evidence={
             "source": "seed",
             "checks": [
-                "S-120 is KEPT on INV-1051",
-                f"deduction 2000 ≤ line price {line.price_cents}",
-                f"deduction 2000 ≤ invoice due {inv.total_cents - inv.paid_cents}",
+                "You kept S-120 (on INV-1051)",
+                f"Within its {usd(line.price_cents)} price",
+                f"INV-1051 still owes {usd(inv.total_cents - inv.paid_cents)}",
             ],
             "records": ["memo_line:S-120", "invoice:INV-1051", "message:seed"],
         },

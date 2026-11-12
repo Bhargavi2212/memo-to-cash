@@ -259,7 +259,7 @@ def test_split_deducts_what_is_due_and_credits_the_rest(api, db, fake, copy):
     st = statement(api, db, copy)
     assert st["credit_cents"] == 1000
     (req,) = [q for q in st["requests"] if q["id"] == copy["proposal"]]
-    assert req["summary"] == ("Approved — $10.00 off INV-1051 and $10.00 credit on your account")
+    assert req["summary"] == ("Approved: $10.00 off INV-1051 and $10.00 credit on your account")
 
 
 def test_split_falls_back_to_apply_or_credit(api, db, fake, copy):
@@ -286,7 +286,7 @@ def test_an_edited_amount_is_the_amount_everywhere(api, db, fake, copy):
     db.expire_all()
     assert db.get(Invoice, copy["invoice"]).total_cents == 140500
     (req,) = [q for q in statement(api, db, copy)["requests"] if q["id"] == copy["proposal"]]
-    assert req["summary"] == "Approved — $15.00 off INV-1051"
+    assert req["summary"] == "Approved: $15.00 off INV-1051"
 
 
 @pytest.mark.parametrize(

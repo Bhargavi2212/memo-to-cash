@@ -106,8 +106,8 @@ def test_message_s120_on_a_fresh_copy_is_an_adjustment(db, api, llm_box):
     r = api.post(f"/api/statement/{b.statement_token}/message",
                  json={"text": "scratch on the solitaire, take $20 off"}).json()  # fmt: skip
     assert r["label"] == "DEDUCTION_REQUEST" and r["fallback"] is False
-    assert r["summary"] == "−$20.00 on INV-1051 for S-120 — waiting for approval"
-    assert r["checks"] == ["S-120 kept on INV-1051", "$20.00 ≤ price $1,420.00"]
+    assert r["summary"] == "$20.00 off INV-1051 for S-120. Waiting for their approval."
+    assert r["checks"] == ["You kept S-120 (on INV-1051)", "Within its $1,420.00 price"]
     (p,) = proposals(db, b.id)
     inv = db.get(Invoice, p.payload["invoice_id"])
     assert p.kind == "ADJUSTMENT" and inv.erp_invoice_no == "INV-1051" and inv.buyer_id == b.id
@@ -121,7 +121,7 @@ def test_same_request_on_the_demo_copy_is_already_sent(db, api, llm_box):
     llm_box["fake"] = FakeLLM(triage=[triage("DEDUCTION_REQUEST", sku="S-120",
                                              amount_cents=2000)])  # fmt: skip
     r = api.post(f"/api/statement/{b.statement_token}/message", json={"text": "$20 off S-120"})
-    assert r.json()["summary"] == "Already sent — waiting for their approval."
+    assert r.json()["summary"] == "Already sent. Waiting for their reply."
     assert r.json()["proposal_ids"] == [] and r.json()["answer"] == r.json()["summary"]
     assert [p.kind for p in proposals(db, b.id)] == ["ADJUSTMENT"]  # R3: nothing filed again
 
@@ -135,9 +135,9 @@ def test_injection_creates_only_a_reply(db, api, llm_box):
     assert r["fallback"] is False
     assert [p.kind for p in proposals(db, b.id)] == ["REPLY"]
     # the guard's note is for the supplier, never shown to the buyer
-    assert r["summary"] == "Sent to Demo Diamond Co. — they'll write back"
+    assert r["summary"] == "Sent to Demo Diamond Co. They'll reply soon."
     reqs = api.get(f"/api/statement/{b.statement_token}").json()["requests"]
-    assert [q["summary"] for q in reqs] == ["Sent to Demo Diamond Co. — they'll write back"]
+    assert [q["summary"] for q in reqs] == ["Sent to Demo Diamond Co. They'll reply soon."]
 
 
 @pytest.mark.parametrize(
@@ -173,8 +173,8 @@ def test_requests_list_the_seeded_and_new_requests(db, api, llm_box):
     api.post(f"/api/statement/{b.statement_token}/message", json={"text": "S-104 50 off"})
     reqs = api.get(f"/api/statement/{b.statement_token}").json()["requests"]
     assert [(q["summary"], q["status"]) for q in reqs] == [
-        ("−$50.00 on INV-1038 for S-104", "WAITING"),
-        ("−$20.00 on INV-1051 for S-120", "WAITING"),
+        ("$50.00 off INV-1038 for S-104", "WAITING"),
+        ("$20.00 off INV-1051 for S-120", "WAITING"),
     ]
     assert reqs[0]["created_at"] == D.isoformat()
 
@@ -191,7 +191,7 @@ def test_concurrent_duplicates_make_one_proposal(db, llm_box):
     r1, r2 = asyncio.run(both())
     kinds = sorted(p.kind for p in proposals(db, b.id))
     assert kinds == ["ADJUSTMENT"]  # the second one is told "Already sent", nothing filed
-    assert sorted([r1.summary.startswith("−$20.00"), r2.summary.startswith("−$20.00")]) == [
+    assert sorted([r1.summary.startswith("$20.00 off"), r2.summary.startswith("$20.00 off")]) == [
         False, True]  # fmt: skip
 
 

@@ -9,7 +9,7 @@ const STATUS: Record<
   RequestStatus,
   { tone: "muted" | "success" | "danger" | "accent"; text: string }
 > = {
-  WAITING: { tone: "muted", text: "Waiting for Demo Diamond Co." },
+  WAITING: { tone: "muted", text: "Waiting for a reply" },
   APPROVED: { tone: "success", text: "Approved" },
   DECLINED: { tone: "danger", text: "Declined" },
   ANSWERED: { tone: "accent", text: "Answered" },

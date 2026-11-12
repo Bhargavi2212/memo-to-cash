@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.agent.facts import proposal_sku
+from backend.agent.tools import usd
 from backend.core.dates import today_ny
 from backend.core.money import to_cents
 from backend.db.models import Invoice, InvoiceLine, Memo, MemoLine, Proposal, ReminderSent
@@ -359,7 +360,10 @@ def _resolve_return_check(s: Session, p: Proposal, edits: dict[str, Any]) -> str
         evidence={
             "source": "return_check",
             "return_check_id": p.id,
-            "checks": [f"{sku} is KEPT on {inv.erp_invoice_no}", f"price {line.price_cents} cents"],
+            "checks": [
+                f"They kept {sku} (on {inv.erp_invoice_no})",
+                f"Price {usd(line.price_cents)}",
+            ],
             "records": [f"memo_line:{sku}", f"invoice:{inv.erp_invoice_no}"],
         },
     )

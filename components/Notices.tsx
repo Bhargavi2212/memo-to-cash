@@ -5,11 +5,11 @@ import { formatCents } from "@/lib/money";
 function text(n: Notice): string {
   switch (n.kind) {
     case "PAYMENT_VOIDED":
-      return "A payment you started didn't go through — nothing was charged.";
+      return "A payment didn't go through. You weren't charged.";
     case "PAYMENT_CREDITED":
       return `${formatCents(n.amount_cents ?? 0)} of your payment is kept as credit on your account.`;
     case "RECORDING_PENDING":
-      return "Your payment is received; we're updating your invoices.";
+      return "We have your payment and are updating your invoices.";
   }
 }
 

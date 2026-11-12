@@ -154,8 +154,10 @@ def proposal_for(s: Session, buyer_id: int, part: Action, msg: Message, label: s
 def _summary_of(part: Action) -> str:
     p = part.payload
     if part.kind == "ADJUSTMENT":
-        return summary("ADJUSTMENT", invoice_no=p["invoice_no"], sku=p["sku"],
-                       amount_cents=p["amount_cents"]) + " — waiting for approval"  # fmt: skip
+        what = summary(
+            "ADJUSTMENT", invoice_no=p["invoice_no"], sku=p["sku"], amount_cents=p["amount_cents"]
+        )
+        return f"{what}. Waiting for their approval."
     if part.kind == "REPLY":
         return summary("REPLY", reason=None if part.evidence.get("internal") else part.reason)
     return summary(part.kind, sku=p.get("sku"), amount_cents=p.get("amount_cents"),
