@@ -9,6 +9,6 @@ export const metadata: Metadata = {
 
 export default function StatementLayout({ children }: LayoutProps<"/s/[token]">) {
   return (
-    <main className="mx-auto w-full max-w-[960px] flex-1 px-4 py-6 sm:py-10">{children}</main>
+    <main className="mx-auto w-full max-w-[960px] lg:max-w-[1200px] flex-1 px-4 py-6 sm:py-10">{children}</main>
   );
 }
