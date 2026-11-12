@@ -2,7 +2,7 @@
 
 **Buyers get one statement link showing what they kept, returned and owe, and pay many PayPal invoices in one payment. An AI agent explains the bill and turns buyer messages into proposals the supplier approves.**
 
-**Try it:** https://memo-to-cash-web.onrender.com → **Start the demo** (no sign-up; PayPal sandbox; the sandbox buyer login is shown on the page) · **Video:** _(link)_ · **Devpost:** _(link)_
+**Try it:** https://memo-to-cash-web.onrender.com → **Start the demo** (no sign-up; PayPal sandbox; the sandbox buyer login is shown on the page) · **Video:** https://youtu.be/-We_CoCbR0k · **Devpost:** _(link)_
 
 ![The buyer's statement](docs/img/statement-1.png)
 
