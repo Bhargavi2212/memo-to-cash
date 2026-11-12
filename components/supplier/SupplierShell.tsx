@@ -1,26 +1,28 @@
 "use client";
-// Shared bits of the supplier pages (P3 A10, A12, G14): the thin banner back to the buyer's
-// statement, the 401 → landing redirect, and the static sample rows (UI_UX §4.3: a frontend
-// constant, demo mode only, "sample — not on PayPal", not counted, not clickable).
+// Shared bits of the supplier pages (P3 A10, A12, G14): the thin banner back to a buyer's
+// statement and the 401 → landing redirect. Every demo buyer is real (P3 §M) — no sample rows.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ApiError, api } from "@/lib/api";
-import { formatCents } from "@/lib/money";
 
-export function SupplierBanner() {
-  const [token, setToken] = useState<string | null>(null);
+/** Links to `token`'s statement (a buyer page: that buyer, P3 §M M4); without one, to the copy's
+ * Northside statement (the overview). */
+export function SupplierBanner({ token: forBuyer }: { token?: string } = {}) {
+  const [copyToken, setCopyToken] = useState<string | null>(null);
   useEffect(() => {
+    if (forBuyer) return;
     let live = true;
     api
       .whoami()
-      .then((w) => live && setToken(w.statement_token))
+      .then((w) => live && setCopyToken(w.statement_token))
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, []);
+  }, [forBuyer]);
+  const token = forBuyer ?? copyToken;
   return (
     // two lines reserved on phones so the late link doesn't push the page down
     <p className="min-h-14 rounded-card bg-accent/5 px-4 py-2 text-sm sm:min-h-0">
@@ -58,44 +60,4 @@ export function useSupplierData<T>(load: () => Promise<T>, reload: number) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload]);
   return { data, error };
-}
-
-const SAMPLES = [
-  { name: "Harbor Gems", owed: 230000, oldest: 12 },
-  { name: "Lakeside Fine Jewelry", owed: 596000, oldest: 31 },
-];
-
-export function SampleRows() {
-  return (
-    <>
-      {SAMPLES.map((s) => (
-        <tr key={s.name} className="text-muted">
-          <td className="px-3 py-2">
-            {s.name} <span className="text-xs">(sample — not on PayPal)</span>
-          </td>
-          <td className="px-3 py-2 text-right">…</td>
-          <td className="px-3 py-2 text-right">…</td>
-          <td className="px-3 py-2 text-right">…</td>
-          <td className="tabular px-3 py-2 text-right">{formatCents(s.owed)}</td>
-          <td className="tabular px-3 py-2 text-right">{s.oldest}d</td>
-        </tr>
-      ))}
-    </>
-  );
-}
-
-/** The same sample rows as stacked cards for phones (< 640 px, UI_UX §6). */
-export function SampleCards() {
-  return (
-    <>
-      {SAMPLES.map((s) => (
-        <li key={s.name} className="px-4 py-3 text-sm text-muted">
-          {s.name} <span className="text-xs">(sample — not on PayPal)</span>
-          <p className="tabular">
-            Owes {formatCents(s.owed)} · oldest {s.oldest}d
-          </p>
-        </li>
-      ))}
-    </>
-  );
 }
