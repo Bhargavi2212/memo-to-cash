@@ -8,6 +8,6 @@ export const metadata: Metadata = {
 
 export default function SupplierLayout({ children }: LayoutProps<"/supplier">) {
   return (
-    <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 py-6 sm:py-10">{children}</main>
+    <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-6 sm:py-10">{children}</main>
   );
 }

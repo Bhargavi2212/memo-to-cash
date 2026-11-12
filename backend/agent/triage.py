@@ -14,7 +14,7 @@ from backend.agent.actions import Action, decide
 from backend.agent.facts import Facts
 from backend.agent.tools import usd
 
-SENT = "Sent to Demo Diamond Co. — they'll write back"
+SENT = "Sent to Demo Diamond Co. They'll reply soon."
 
 
 @dataclass
@@ -80,20 +80,20 @@ def summary(
             return f"Approved as {usd(credit_cents or abs(amount_cents))} credit on your account"
         if status == "DONE" and mode == "SPLIT":
             return (
-                f"Approved — {money} off {invoice_no or 'your invoice'} and "
+                f"Approved: {money} off {invoice_no or 'your invoice'} and "
                 f"{usd(credit_cents or 0)} credit on your account"
             )
         if status in ("APPROVED", "DONE"):
-            return f"Approved — {money} off {invoice_no or 'your invoice'}"
-        return f"−{money} on {invoice_no or 'your invoice'} for {sku or 'an item'}"
+            return f"Approved: {money} off {invoice_no or 'your invoice'}"
+        return f"{money} off {invoice_no or 'your invoice'} for {sku or 'an item'}"
     if kind == "RETURN_CHECK":
-        return f"Return of {sku or 'an item'} — Demo Diamond Co. will check their records"
+        return f"Return of {sku or 'an item'}. Demo Diamond Co. will check their records."
     if kind == "PROMISE_NOTE" and promise_date:
         when = _day(date.fromisoformat(promise_date))
         extra = f" ({usd(amount_cents)})" if amount_cents else ""
-        return f"Payment planned for {when}{extra} — noted for Demo Diamond Co."
+        return f"You plan to pay on {when}{extra}. Demo Diamond Co. has been told."
     if kind == "REPLY" and reason and not fallback:
-        return f"{SENT} ({reason})"
+        return f"Sent to Demo Diamond Co. ({reason}). They'll reply soon."
     return SENT
 
 

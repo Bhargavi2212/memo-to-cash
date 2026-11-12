@@ -106,26 +106,26 @@ export function Receipt() {
         <p className="tabular mt-1 text-3xl font-semibold">{formatCents(r.amount_cents)}</p>
         <p className="mt-1 text-sm text-muted">
           {r.received_at ? shortDate(r.received_at) : "Today"}
-          {r.paypal_capture_id && <> · PayPal capture {r.paypal_capture_id}</>}
+          {r.paypal_capture_id && <> · PayPal ref {r.paypal_capture_id}</>}
         </p>
       </header>
 
       {pending && (
         <p role="status" className="rounded-card border border-line bg-surface px-4 py-3 text-sm">
-          PayPal is still processing your payment. We&apos;ll apply it to your invoices as soon as
-          PayPal confirms it.
+          PayPal is still processing this payment. We&apos;ll apply it to your invoices once it
+          clears.
         </p>
       )}
       {r.resplit && (
         <p className="rounded-card border border-line bg-surface px-4 py-3 text-sm">
-          Your split was updated because a balance changed.
+          A balance changed, so we adjusted where your payment went.
         </p>
       )}
 
       {r.allocations.length > 0 && (
         <section aria-labelledby="applied-h" className="space-y-3">
           <h2 id="applied-h" className="text-lg font-semibold">
-            Applied to
+            Where it went
           </h2>
           <ul className="divide-y divide-line rounded-card border border-line bg-surface">
             {r.allocations.map((a) => (
@@ -165,7 +165,7 @@ export function Receipt() {
 
       {(stuck || r.allocations.some((a) => a.record_state === "FAILED")) && (
         <div className="rounded-card border border-warning/30 bg-warning/5 p-4 text-sm">
-          <p>Your payment is safe with us. Some PayPal invoices haven&apos;t shown it yet.</p>
+          <p>Your payment is safe. Some PayPal invoices don&apos;t show it yet.</p>
           <button
             type="button"
             disabled={retrying}

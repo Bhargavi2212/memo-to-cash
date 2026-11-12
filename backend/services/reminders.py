@@ -160,7 +160,7 @@ def _save(
                     f"{prep['invoice_no']} is {prep['days']} day{'' if prep['days'] == 1 else 's'} "
                     "past due",
                     f"{usd(prep['due_cents'])} due",
-                    "every amount and day count is from the records",
+                    "Amounts and dates match the records",
                 ],
                 "records": [f"invoice:{prep['invoice_no']}"],
             },

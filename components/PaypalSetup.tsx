@@ -43,15 +43,14 @@ export function PaypalSetup({
     <div role="status" aria-live="polite" className="rounded-card border border-line bg-surface p-4 text-sm">
       {failed ? (
         <div className="flex flex-wrap items-center gap-3">
-          <p className="text-danger">Couldn&apos;t set up these invoices on PayPal.</p>
+          <p className="text-danger">These invoices aren&apos;t ready on PayPal yet.</p>
           <button type="button" onClick={retry} className="min-h-11 rounded-card border border-accent px-4 font-medium text-accent">
             Retry
           </button>
         </div>
       ) : (
         <p className="text-muted">
-          Setting up on PayPal… {action} opens as soon as these invoices are on PayPal (a few
-          seconds).
+          Getting these invoices ready on PayPal. {action} opens in a few seconds.
         </p>
       )}
     </div>

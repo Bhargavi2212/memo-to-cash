@@ -160,8 +160,7 @@ function Answer({
             )}
           </div>
           <p className="mt-3 text-xs text-muted">
-            Looked up: {chips.map((c) => c.label.split(" · ")[0]).join(" · ")} ·
-            Checked by our assistant against your records
+            Checked against your records: {chips.map((c) => c.label.split(" · ")[0]).join(", ")}
           </p>
         </>
       )}

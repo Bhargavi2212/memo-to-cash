@@ -88,12 +88,12 @@ def _return_claim(fields: dict[str, Any], facts: Facts) -> Action:
                 f"REPLY:UNKNOWN:{sku}",
                 payload={"sku": sku},
                 evidence={"source": "agent"},
-                reason=f"{sku} isn't on your memos — Demo Diamond Co. will check",
+                reason=f"{sku} isn't on your memos. Demo Diamond Co. will check",
             )
         )
     if not any(p.kind != "REPLY" for p in parts):
         names = ", ".join(skus) or "that item"
-        return _reply(f"{names} isn't on your memos — Demo Diamond Co. will check")
+        return _reply(f"{names} isn't on your memos. Demo Diamond Co. will check")
     if len(parts) == 1:
         return parts[0]
     return Action("MULTI", "|".join(p.code for p in parts), parts=parts)
@@ -127,10 +127,10 @@ def decide(label: str, fields: dict[str, Any], text: str, facts: Facts) -> Actio
             for p in facts.proposals
         ):  # fmt: skip
             # R3: no second proposal — the buyer is told, nothing is filed
-            return _reply("Already sent — waiting for their approval", duplicate=True)
+            return _reply("Already sent. Waiting for their reply", duplicate=True)
         checks = [
-            f"{line.sku} kept on {inv.invoice_no}",
-            f"{usd(amount)} ≤ price {usd(line.price_cents)}",
+            f"You kept {line.sku} (on {inv.invoice_no})",
+            f"Within its {usd(line.price_cents)} price",
         ]
         others = sorted({s.upper() for s in SKU_RE.findall(text or "")} - {line.sku})
         evidence: dict[str, Any] = {

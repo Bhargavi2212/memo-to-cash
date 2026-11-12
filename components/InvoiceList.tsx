@@ -10,13 +10,13 @@ import { StatusChip } from "./StatusChip";
 function Chip({ inv }: { inv: Invoice }) {
   if (inv.due_cents === 0) return <StatusChip tone="success">Paid</StatusChip>;
   if (inv.days_overdue > 0)
-    return <StatusChip tone="warning">Overdue {inv.days_overdue}d</StatusChip>;
-  const chip = inv.paid_cents > 0 ? <StatusChip tone="accent">Part paid</StatusChip> : null;
+    return <StatusChip tone="warning">{inv.days_overdue} days overdue</StatusChip>;
+  const chip = inv.paid_cents > 0 ? <StatusChip tone="accent">Partly paid</StatusChip> : null;
   const days = daysUntil(inv.due_on);
   return (
     <span className="flex flex-wrap gap-1">
       {chip}
-      <StatusChip tone="muted">{days === 0 ? "Due today" : `Due in ${days}d`}</StatusChip>
+      <StatusChip tone="muted">{days === 0 ? "Due today" : `Due in ${days} days`}</StatusChip>
     </span>
   );
 }

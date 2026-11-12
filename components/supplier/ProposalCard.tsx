@@ -11,9 +11,9 @@ import { formatCents, parseDollars } from "@/lib/money";
 import { StatusChip } from "../StatusChip";
 
 const SOURCE: Record<Card["source"], string> = {
-  agent: "agent",
-  seed: "seed",
-  fallback: "assistant couldn't answer",
+  agent: "AI",
+  seed: "sample",
+  fallback: "needs your reply",
   system: "automatic",
 };
 
@@ -109,14 +109,15 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
       )}
       {isAdj && card.due_cents !== null && (
         <p className="mt-2 text-xs text-muted">
-          {card.invoice_no} has {formatCents(card.due_cents)} due now.
-          {card.suggested === "CREDIT" && " It's already paid, so this becomes a credit."}
+          {card.suggested === "CREDIT"
+            ? `${card.invoice_no} is already paid, so this becomes a credit.`
+            : `${card.invoice_no} still owes ${formatCents(card.due_cents)}.`}
         </p>
       )}
       {failed && card.result?.error && (
         <p role="alert" className="mt-2 text-sm text-danger">
-          PayPal said: {String(card.result.error)}. Our records already show the change — retry
-          to update PayPal.
+          PayPal didn&apos;t take the update ({String(card.result.error)}). Your records are
+          already right. Try again to update PayPal.
         </p>
       )}
 
@@ -145,7 +146,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
                   ? "Take it off the invoice"
                   : m === "CREDIT"
                     ? "Give it as credit"
-                    : `Take ${formatCents(Math.min(card.due_cents ?? 0, Math.abs(card.payload.amount_cents ?? 0)))} off + credit the rest`}
+                    : `Take ${formatCents(Math.min(card.due_cents ?? 0, Math.abs(card.payload.amount_cents ?? 0)))} off and credit the rest`}
               </label>
             ))}
           </fieldset>
@@ -153,7 +154,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
       )}
       {card.kind === "PROMISE_NOTE" && !rejecting && card.status === "PENDING" && (
         <label className="mt-3 block text-sm">
-          Promised date (correct it if the buyer meant another day)
+          Promised date
           <input
             type="date"
             value={promiseDate}
@@ -164,7 +165,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
       )}
       {isReminder && !rejecting && (
         <label className="mt-3 block text-sm">
-          Reminder PayPal will email (edit before sending)
+          Reminder (you can edit it)
           <textarea
             value={text}
             maxLength={500}
@@ -297,7 +298,7 @@ export function ProposalCard({ card, onDone }: { card: Card; onDone: (d: Decided
 export function resultLine(card: Card): { text: string; link: string | null } {
   const r = card.result ?? {};
   if (card.status === "REJECTED")
-    return { text: r.reply_text ? `Declined — note sent: “${r.reply_text}”` : "Declined", link: null };
+    return { text: r.reply_text ? `Declined. Note sent: “${r.reply_text}”` : "Declined", link: null };
   if (card.payload.mode === "CREDIT")
     return { text: `Approved as ${formatCents(card.payload.credit_cents ?? 0)} credit`, link: null };
   if (typeof r.paypal_due_cents === "number")

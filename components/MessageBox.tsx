@@ -73,8 +73,8 @@ export function MessageBox({
         Tell Demo Diamond Co.
       </h2>
       <p className="mt-1 text-sm text-muted">
-        A damaged item, a return, when you&apos;ll pay — they decide; nothing
-        changes until they do.
+        A damaged piece, a return, or when you&apos;ll pay. Nothing changes until they
+        agree.
       </p>
       {demoMode && (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -162,7 +162,7 @@ function Sent({ result }: { result: MessageResult }) {
       )}
       {!result.fallback && (
         <p className="mt-3 text-xs text-muted">
-          Checked by our assistant against your records
+          Checked against your records
         </p>
       )}
     </div>

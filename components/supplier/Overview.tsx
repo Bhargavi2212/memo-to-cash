@@ -24,7 +24,7 @@ function oldest(b: Buyer): string {
 function SetupNote({ b, gaveUp }: { b: Buyer; gaveUp: boolean }) {
   if (b.paypal_setup === "READY") return null;
   return b.paypal_setup === "FAILED" || gaveUp ? (
-    <span className="block text-xs text-danger">Couldn&apos;t set up on PayPal — open to retry</span>
+    <span className="block text-xs text-danger">Not on PayPal yet. Open it to retry.</span>
   ) : (
     <span className="block text-xs text-muted">Setting up on PayPal…</span>
   );
@@ -198,7 +198,7 @@ export function Overview() {
             <DecidedCard key={`d-${c.id}`} card={c} />
           ))}
           {pending.length === 0 && decided.length === 0 && (
-            <p className="text-sm text-muted">Nothing waiting — you&apos;re all caught up.</p>
+            <p className="text-sm text-muted">Nothing to decide. You&apos;re all caught up.</p>
           )}
           {pending.map((c) => (
             <ProposalCard key={c.id} card={c} onDone={onDecided(c)} />

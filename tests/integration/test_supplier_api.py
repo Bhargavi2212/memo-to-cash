@@ -79,8 +79,8 @@ def test_overview_shows_the_visitors_own_copy(clients, db):
     assert row["owed_cents"] == 842000 and row["pending_proposals"] == 1
     (card,) = o["pending"]
     assert card["kind"] == "ADJUSTMENT" and card["source"] == "agent"
-    assert card["summary"] == "−$20.00 on INV-1051 for S-120"
-    assert card["checks"] == ["S-120 kept on INV-1051", "$20.00 ≤ price $1,420.00"]
+    assert card["summary"] == "$20.00 off INV-1051 for S-120"
+    assert card["checks"] == ["You kept S-120 (on INV-1051)", "Within its $1,420.00 price"]
     assert "S-120" in card["message_text"] and card["due_cents"] == 142000
     assert card["suggested"] == "APPLY" and card["invoice_no"] == "INV-1051"
     assert o["recent_payments"] == []
